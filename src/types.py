@@ -1,22 +1,21 @@
 from __future__ import annotations
-from typing import Generic, Literal, Optional, TypeVar
+from typing import  Literal, Union
 
 from torch import Tensor
 from typing_extensions import TypeAlias, TypedDict
 
 __all__ = [
-    "L",
     "LitFalse",
     "LitTrue",
-    "Sample",
+    "SampleL",
+    "SampleU",
 ]
 
 LitTrue: TypeAlias = Literal[True]
 LitFalse: TypeAlias = Literal[False]
 
-L = TypeVar("L", bound=Optional[Tensor])
-
-
-class Sample(TypedDict, Generic[L]):
+class SampleU(TypedDict):
     image: Tensor
-    label: L
+
+class SampleL(SampleU):
+    label: Tensor

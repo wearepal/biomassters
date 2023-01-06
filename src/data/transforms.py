@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from typing import (
     ClassVar,
+    overload,
     List,
+    TypeVar,
     Optional,
+    Generic,
     Protocol,
     Sequence,
     Union,
@@ -14,7 +17,7 @@ from torch import Tensor
 import torch.nn as nn
 from typing_extensions import override
 
-from src.types import L, Sample
+from src.types import  SampleU, SampleL
 
 __all__ = [
     "AGBMLog1PScale",
@@ -22,7 +25,7 @@ __all__ = [
     "ClampAGBM",
     "Compose",
     "DropBands",
-    "SampleTransform",
+    "InputTransform",
     "Sentinel1Scale",
     "Sentinel2Scale",
     "TensorTransform",
@@ -38,37 +41,67 @@ class TensorTransform(Protocol):
 
 @dataclass(unsafe_hash=True)
 @runtime_checkable
-class SampleTransform(Protocol):
-    def __call__(self, inputs: Sample[L]) -> Sample[L]:
+class InputTransform(Protocol):
+    def __call__(self, inputs: SampleU) -> SampleU:
         ...
+
+@dataclass(unsafe_hash=True)
+@runtime_checkable
+class TargetTransform(Protocol):
+    def __call__(self, inputs: SampleL) -> SampleL:
+        ...
+
+T = TypeVar("T", Union[InputTransform, TargetTransform],  InputTransform, TargetTransform)
+S = TypeVar("S", bound=Union[SampleU, SampleL])
 
 
 @dataclass(unsafe_hash=True)
-class Compose(SampleTransform):
-    transforms: Sequence[Union[SampleTransform, TensorTransform]]
+class Compose(InputTransform, Generic[T]):
+    transforms: Sequence[T]
+
+    @overload
+    def __call__(self: "Compose[InputTransform]", inputs: SampleU) -> SampleU:
+        ...
+    @overload
+    def __call__(self: "Compose[TargetTransform]", inputs: SampleL) -> SampleL:
+        ...
+    # @overload
+    # def __call__(self: "Compose[TensorTransform]", inputs: SampleU) -> SampleU:
+    #     ...
+    # @overload
+    # def __call__(self: "Compose[Union[InputTransform, TensorTransform]]", inputs: SampleU) -> SampleU:
+    #     ...
+    @overload
+    def __call__(self: "Compose[Union[InputTransform, TargetTransform]]", inputs: SampleL) -> SampleL:
+        ...
+    # @overload
+    # def __call__(self: "Compose[Union[TargetTransform, TensorTransform]]", inputs: SampleL) -> SampleL:
+    #     ...
+    # @overload
+    # def __call__(self: "Compose[Union[InputTransform, TargetTransform, TensorTransform]]", inputs: SampleL) -> SampleL:
+        # ...
 
     @override
-    def __call__(self, inputs: Sample[L]) -> Sample[L]:
+    def __call__(self, inputs):
         for transform in self.transforms:
             if isinstance(transform, TensorTransform):
                 inputs["image"] = transform(inputs["image"])
             else:
-                inputs = transform(inputs)
+                inputs = transform(inputs) # type: ignore
         return inputs
 
 
-class AGBMLog1PScale(SampleTransform):
+class AGBMLog1PScale(TargetTransform):
     """Apply ln(x + 1) Scale to AGBM Target Data"""
 
     @override
-    def __call__(self, inputs: Sample) -> Sample:
-        if inputs["label"] is not None:
-            inputs["label"] = torch.log1p(inputs["label"])
+    def __call__(self, inputs: SampleL) -> SampleL:
+        inputs["label"] = torch.log1p(inputs["label"])
         return inputs
 
 
 @dataclass(unsafe_hash=True)
-class ClampAGBM(SampleTransform):
+class ClampAGBM(TargetTransform):
     """Clamp AGBM Target Data to [vmin, vmax]"""
 
     vmin: float = 0.0
@@ -77,20 +110,19 @@ class ClampAGBM(SampleTransform):
     "maximum clamp value, 500 is reasonable default per empirical analysis of AGBM data"
 
     @override
-    def __call__(self, inputs: Sample[L]) -> Sample[L]:
-        if inputs["label"] is not None:
-            inputs["label"] = torch.clamp(inputs["label"], min=self.vmin, max=self.vmax)
+    def __call__(self, inputs: SampleL) -> SampleL:
+        inputs["label"] = torch.clamp(inputs["label"], min=self.vmin, max=self.vmax)
         return inputs
 
 
 @dataclass(unsafe_hash=True)
-class DropBands(SampleTransform):
+class DropBands(InputTransform):
     """Drop specified bands by index"""
 
     bands_to_keep = Optional[List[int]]
 
     @override
-    def __call__(self, inputs: Sample[L]) -> Sample[L]:
+    def __call__(self, inputs: SampleU) -> SampleU:
         if self.bands_to_keep is None:
             return inputs
 
@@ -110,7 +142,7 @@ class DropBands(SampleTransform):
 
 
 @dataclass(unsafe_hash=True)
-class AppendRatioAB(SampleTransform):
+class AppendRatioAB(InputTransform):
     """Append the ratio of specified bands to the tensor."""
 
     EPSILON: ClassVar[float] = 1e-10
@@ -129,7 +161,7 @@ class AppendRatioAB(SampleTransform):
         return band_a / band_b.clamp_min(self.EPSILON)
 
     @override
-    def __call__(self, sample: Sample[L]) -> Sample[L]:
+    def __call__(self, sample: SampleU) -> SampleU:
         """Compute and append ratio to input tensor.
         :param sample: dict with tensor stored in sample['image']
         :returns: the transformed sample

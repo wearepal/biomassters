@@ -1,8 +1,6 @@
 from enum import Enum
-from glob import glob
-import os
 from pathlib import Path
-from typing import ClassVar, Generic, Optional, TypeVar, Union, overload
+from typing import ClassVar, Generic, Literal, Optional, TypeVar, Union, overload
 import warnings
 
 import numpy as np
@@ -13,8 +11,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from src.data.transforms import SampleTransform, Sentinel1Scale, Sentinel2Scale
-from src.types import LitFalse, LitTrue, Sample
+from src.data.transforms import InputTransform, Sentinel1Scale, Sentinel2Scale
+from src.types import LitFalse, LitTrue, Sample, SampleL, SampleU
 
 warnings.filterwarnings("ignore", category=rasterio.errors.NotGeoreferencedWarning)
 
@@ -29,7 +27,7 @@ class SentinelType(Enum):
 B = TypeVar("B", LitTrue, LitFalse)
 
 
-class SentinelDataset(Dataset[Sample], Generic[B]):
+class SentinelDataset(Dataset[SampleU], Generic[B]):
     """Sentinel 1 & 2 dataset."""
 
     TRAIN_DIR_NAME: ClassVar[str] = "train_features"
@@ -43,20 +41,21 @@ class SentinelDataset(Dataset[Sample], Generic[B]):
         tile_file: Optional[Path] = None,
         max_chips: Optional[int] = None,
         train: B = True,
-        transform: Optional[SampleTransform] = None,
+        transform: Optional[InputTransform] = None,
     ) -> None:
-        self.root = Path(root)
-        self.img_dir = self.root / (self.TRAIN_DIR_NAME if train else self.TEST_DIR_NAME)
-        self.dir_target = (self.root / self.TARGET_DIR_NAME) if train else None
         self.train = train
+        self.root = Path(root)
+        self.input_dir = self.root / (self.TRAIN_DIR_NAME if self.train else self.TEST_DIR_NAME)
+        self.target_dir = (self.root / self.TARGET_DIR_NAME) if self.train else None
+        self.tile_file = tile_file
 
-        if tile_file is None:
-            self.metadata = self._make_df_tile_list(self.img_dir)
+        if self.tile_file is None:
+            self.metadata = self._generate_metadata()
         else:
-            self.metadata = pd.read_csv(tile_file, index_col=0)
+            self.metadata = pd.read_csv(self.tile_file, index_col=0)
         if max_chips is not None:
             self.metadata = self.metadata.iloc[:max_chips]
-        self.chipid = self.metadata["chipid"].to_numpy()
+        self.chip = self.metadata["chip"].to_numpy()
         self.month = self.metadata["month"].to_numpy()
 
         self.transform_s2 = Sentinel2Scale()
@@ -88,36 +87,43 @@ class SentinelDataset(Dataset[Sample], Generic[B]):
         return self[0]["label"].size()
 
     @overload
-    def __getitem__(self: "SentinelDataset[LitTrue]", index: int) -> Sample[Tensor]:
+    def __getitem__(self: "SentinelDataset[LitTrue]", index: int) -> SampleL:
         ...
 
     @overload
-    def __getitem__(self: "SentinelDataset[LitFalse]", index: int) -> Sample[None]:
+    def __getitem__(self: "SentinelDataset[LitFalse]", index: int) -> SampleU:
         ...
 
     def __getitem__(self: "SentinelDataset", index: int) -> Sample:
-        chipid = self.chipid[index]
+        chip = self.chip[index]
         month = self.month[index]
+
         s1_tile = self._load_sentinel_tiles(
             sentinel_type=SentinelType.S1,
-            chipid=chipid,
+            chip=chip,
             month=month,
         )
+
         s1_tile_scaled = self.transform_s1(s1_tile)
+        sentinel_tile = s1_tile_scaled
+
         s2_tile = self._load_sentinel_tiles(
             sentinel_type=SentinelType.S2,
-            chipid=chipid,
+            chip=chip,
             month=month,
         )
-        s2_tile_scaled = self.transform_s2(s2_tile)
+        if s2_tile is not None:
+            s2_tile_scaled = self.transform_s2(s2_tile)
+        # TODO: THIS IS BAD
+        else:
+            # Replace S2 channels with zero-padding if S2 data is irretrievable for
+            # the given chip.
+            s2_tile_scaled = s1_tile_scaled.new_zeros((11, 256, 256))
         sentinel_tile = torch.cat([s1_tile_scaled, s2_tile_scaled], dim=0)
-        sentinel_tile = s1_tile_scaled
-        target_tile = self._load_agbm_tile(chipid)
-
-        sample: Sample = {
-            "image": sentinel_tile,
-            "label": target_tile,
-        }
+        sample = { "image": sentinel_tile}
+        if self.train:
+            target_tile = self._load_agbm_tile(chip)
+            sample["label"] =  target_tile
 
         if self.transform is not None:
             sample = self.transform(sample)
@@ -132,24 +138,50 @@ class SentinelDataset(Dataset[Sample], Generic[B]):
             )
         return tif
 
+    @overload
     def _load_sentinel_tiles(
-        self, sentinel_type: SentinelType, *, chipid: int, month: str
+        self, sentinel_type: Literal[SentinelType.S1], *, chip: int, month: str
     ) -> Tensor:
-        filename = f"{chipid}_{sentinel_type.value}_{str(month).zfill(2)}.tif"
-        filepath = self.img_dir / filename
-        return self._read_tif_to_tensor(filepath)
+        ...
 
-    def _load_agbm_tile(self, chipid: int) -> Optional[Tensor]:
-        if self.dir_target is not None:
-            target_path = self.dir_target / f"{chipid}_agbm.tif"
+    # Some chip are missing S2 data.
+    @overload
+    def _load_sentinel_tiles(
+        self, sentinel_type: Literal[SentinelType.S2], *, chip: int, month: str
+    ) -> Optional[Tensor]:
+        ...
+
+    def _load_sentinel_tiles(
+        self: "SentinelDataset", sentinel_type: SentinelType, *, chip: int, month: str
+    ) -> Optional[Tensor]:
+        filename = f"{chip}_{sentinel_type.value}_{str(month).zfill(2)}.tif"
+        filepath = self.input_dir / filename
+        if filepath.exists():
+            return self._read_tif_to_tensor(filepath)
+
+    @overload
+    def _load_agbm_tile(self: "SentinelDataset[LitTrue]", chip: int) -> Tensor:
+        ...
+    @overload
+    def _load_agbm_tile(self: "SentinelDataset[LitFalse]", chip: int) -> None:
+        ...
+
+    def _load_agbm_tile(self: "SentinelDataset", chip: int) -> Optional[Tensor]:
+        if self.target_dir is not None:
+            target_path = self.target_dir / f"{chip}_agbm.tif"
             return self._read_tif_to_tensor(target_path)
 
-    def _make_df_tile_list(self, dir_tiles: Path) -> pd.DataFrame:
-        tile_files = [os.path.basename(f).split(".")[0] for f in glob(f"{dir_tiles}/*.tif")]
-        tile_tuples = []
-        for tile_file in tile_files:
-            chipid, _, month = tile_file.split("_")
-            tile_tuples.append(tuple([chipid, int(month)]))
-        tile_tuples = list(set(tile_tuples))
-        tile_tuples.sort()
-        return pd.DataFrame(tile_tuples, columns=["chipid", "month"])
+    def _generate_metadata(self) -> pd.DataFrame:
+        filenames = pd.Series(self.input_dir.glob("*.tif"), dtype=str).str.rstrip(".tif")
+        filenames = filenames.str.split("/", expand=True).iloc[:, -1]
+        metadata = filenames.str.split("_", expand=True)
+        metadata.rename(
+            columns={0: "chip", 1: "sentinel", 2: "month"},
+            inplace=True,
+        )
+        # Currrently we sample a chip/month and then sample both data from
+        # both satellites; this scheme is very much subject to change. For instance,
+        # we might wish to sample by chip and treat the monthly data as a spatiotemporal series.
+        metadata.drop_duplicates(subset=["chip", "month"], inplace=True)
+        metadata.sort_values(by="chip", inplace=True)
+        return metadata
