@@ -2,7 +2,7 @@ from enum import Enum
 from glob import glob
 import os
 from pathlib import Path
-from typing import ClassVar, Generic, Literal, Optional, TypeVar, Union, overload
+from typing import ClassVar, Generic, Optional, TypeVar, Union, overload
 import warnings
 
 import numpy as np
@@ -92,7 +92,7 @@ class SentinelDataset(Dataset[Sample], Generic[B]):
         ...
 
     @overload
-    def __getitem__(self: "SentinelDataset[LitFalse]", index: bool) -> Sample[None]:
+    def __getitem__(self: "SentinelDataset[LitFalse]", index: int) -> Sample[None]:
         ...
 
     def __getitem__(self: "SentinelDataset", index: int) -> Sample:
