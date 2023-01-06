@@ -2,7 +2,7 @@ from enum import Enum
 from glob import glob
 import os
 from pathlib import Path
-from typing import ClassVar, Generic, Literal, Optional, Tuple, TypeVar, Union, overload
+from typing import ClassVar, Generic, Literal, Optional, TypeVar, Union, overload
 import warnings
 
 import numpy as np
@@ -14,7 +14,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from src.data.transforms import SampleTransform, Sentinel1Scale, Sentinel2Scale
-from src.types import Sample
+from src.types import LitFalse, LitTrue, Sample
 
 warnings.filterwarnings("ignore", category=rasterio.errors.NotGeoreferencedWarning)
 
@@ -26,7 +26,7 @@ class SentinelType(Enum):
     S2 = "S2"
 
 
-B = TypeVar("B", Literal[True], Literal[False])
+B = TypeVar("B", LitTrue, LitFalse)
 
 
 class SentinelDataset(Dataset[Sample], Generic[B]):
@@ -88,11 +88,11 @@ class SentinelDataset(Dataset[Sample], Generic[B]):
         return self[0]["label"].size()
 
     @overload
-    def __getitem__(self: "SentinelDataset[True]", index: int) -> Sample[Tensor]:
+    def __getitem__(self: "SentinelDataset[LitTrue]", index: int) -> Sample[Tensor]:
         ...
 
     @overload
-    def __getitem__(self: "SentinelDataset[False]", index: bool) -> Sample[None]:
+    def __getitem__(self: "SentinelDataset[LitFalse]", index: bool) -> Sample[None]:
         ...
 
     def __getitem__(self: "SentinelDataset", index: int) -> Sample:
