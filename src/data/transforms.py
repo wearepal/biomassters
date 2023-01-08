@@ -33,7 +33,6 @@ __all__ = [
 
 
 @runtime_checkable
-@dataclass(unsafe_hash=True)
 class TensorTransform(Protocol):
     def __call__(self, x: Tensor) -> Tensor:
         ...
@@ -43,14 +42,12 @@ S = TypeVar("S", bound=SampleU)
 
 
 @runtime_checkable
-@dataclass(unsafe_hash=True)
 class InputTransform(Protocol):
     def __call__(self, inputs: S) -> S:
         ...
 
 
 @runtime_checkable
-@dataclass(unsafe_hash=True)
 class TargetTransform(Protocol):
     def __call__(self, inputs: SampleL) -> SampleL:
         ...
@@ -59,7 +56,6 @@ class TargetTransform(Protocol):
 T = TypeVar("T", Union[InputTransform, TargetTransform], InputTransform, TargetTransform)
 
 
-@dataclass(unsafe_hash=True, init=False)
 class Compose(Generic[T]):
     def __init__(self, *transforms: T) -> None:
         self.transforms = transforms
@@ -143,7 +139,6 @@ class AppendRatioAB(InputTransform):
         return sample
 
 
-@dataclass(unsafe_hash=True)
 class AGBMLog1PScale(TargetTransform):
     """Apply ln(x + 1) Scale to AGBM Target Data"""
 
@@ -180,7 +175,6 @@ def scale_sentinel2_data(x: Tensor) -> Tensor:
     return x.clamp(0, 1.0)
 
 
-@dataclass(unsafe_hash=True)
 class Sentinel2Scale(TensorTransform):
     """Scale Sentinel 2 optical channels"""
 
@@ -196,7 +190,6 @@ def scale_sentinel1_data(x: Tensor) -> Tensor:
     return image.clamp(0, 1)
 
 
-@dataclass(unsafe_hash=True)
 class Sentinel1Scale(TensorTransform):
     """Scale Sentinel 1 SAR channels"""
 

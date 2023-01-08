@@ -101,11 +101,26 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         self,
         root: Union[Path, str],
         *,
+        train: LitTrue,
+        tile_file: Optional[Path] = ...,
+        group_by: GroupBy = ...,
+        temporal_dim: TemporalDim = ...,
+        preprocess: LitTrue = ...,
+        n_pp_jobs: int = ...,
+        transform: Optional[Union[InputTransform, TargetTransform]] = ...,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self,
+        root: Union[Path, str],
+        *,
         train: LitTrue = ...,
         tile_file: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
-        preprocess: P = ...,
+        preprocess: LitFalse,
         n_pp_jobs: int = ...,
         transform: Optional[Union[InputTransform, TargetTransform]] = ...,
     ) -> None:
@@ -120,7 +135,22 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         tile_file: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
-        preprocess: P = ...,
+        preprocess: LitTrue = ...,
+        n_pp_jobs: int = ...,
+        transform: Optional[InputTransform] = ...,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self,
+        root: Union[Path, str],
+        *,
+        train: LitFalse,
+        tile_file: Optional[Path] = ...,
+        group_by: GroupBy = ...,
+        temporal_dim: TemporalDim = ...,
+        preprocess: LitFalse,
         n_pp_jobs: int = ...,
         transform: Optional[InputTransform] = ...,
     ) -> None:
@@ -178,11 +208,14 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
     @property
     @lru_cache(maxsize=16)
     def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]"):
-        stem = f"group_by={self.group_by.name}"
+        pp_dir_stem = f"group_by={self.group_by.name}"
         if self.group_by is GroupBy.CHIP:
-            stem += f"_temporal_dim={self.temporal_dim}"
+            pp_dir_stem += f"_temporal_dim={self.temporal_dim}"
+        if self.tile_file is not None:
+            tf_stem = self.tile_file.stem
+            pp_dir_stem += f"_tile_file={tf_stem}"
         split = "train" if self.train else "test"
-        return self.root / "preprocessed" / split / stem
+        return self.root / "preprocessed" / split / pp_dir_stem
 
     @property
     @lru_cache(maxsize=16)
@@ -197,7 +230,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
             torch.save(self._load_unprocessed(index), f=pp_dir / f"{index}.pt")
 
         try:
-            with tqdm_joblib(tqdm(desc="Preprocessing", total=len(self))) as pbar:
+            with tqdm_joblib(tqdm(desc="Preprocessing", total=len(self))):
                 joblib.Parallel(n_jobs=self.n_pp_jobs)(
                     joblib.delayed(_load_save)(index) for index in range(len(self))
                 )
@@ -349,9 +382,9 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
 
     def __getitem__(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
         if self.preprocess:
-            item = self._load_preprocessed(index)
+            sample = self._load_preprocessed(index)
         else:
-            item = self._load_unprocessed(index)
+            sample = self._load_unprocessed(index)
         if self.transform is not None:
-            item = self.transform(item)
-        return item
+            sample = self.transform(sample)
+        return sample

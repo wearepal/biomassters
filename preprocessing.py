@@ -1,3 +1,4 @@
+from functools import partial
 from pathlib import Path
 from typing import Tuple
 import warnings
@@ -9,7 +10,7 @@ from torch import Tensor
 from torchgeo.transforms import indices
 from tqdm import tqdm
 
-from src.data import InputTransform, SentinelDataset
+from src.data import SentinelDataset
 import src.data.transforms as T
 
 warnings.filterwarnings("ignore", r"All-NaN (slice|axis) encountered")
@@ -75,26 +76,22 @@ def find_best_months(df_scores: pd.DataFrame) -> pd.DataFrame:
 
 if __name__ == "__main__":
     root = Path("/srv/galene0/shared/data/biomassters/")
-    transforms: InputTransform = T.Compose(
-        indices.AppendNDVI(index_nir=10, index_red=4),  # type: ignore
+    transforms = T.Compose(
+        indices.AppendNDVI(index_nir=10, index_red=4),
         T.AppendRatioAB(index_a=0, index_b=1),  # VV/VH Ascending, index 16
     )
-    ds_train = SentinelDataset(
+    fact_func = partial(
+        SentinelDataset,
         root=root,
-        train=True,
-        group_by=SentinelDataset.GroupBy.CHIP,
+        group_by=SentinelDataset.GroupBy.CHIP_MONTH,
         transform=transforms,
     )
+    ds_train = fact_func(train=True)
     df_scores = calc_quality_scores(ds_train)
     df_best = find_best_months(df_scores)
     df_best.to_csv("./TILE_LIST_BEST_MONTHS.csv")
 
-    ds_test = SentinelDataset(
-        root=root,
-        train=False,
-        group_by=SentinelDataset.GroupBy.CHIP,
-        transform=transforms,
-    )
+    ds_test = fact_func(train=False)
     df_scores_test = calc_quality_scores(ds_test)
     df_best_test = find_best_months(df_scores_test)
     df_best_test.to_csv("./TILE_LIST_BEST_TEST_MONTHS_v2.csv")
