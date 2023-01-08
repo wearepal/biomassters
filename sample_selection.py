@@ -89,9 +89,10 @@ if __name__ == "__main__":
     ds_train = fact_func(train=True)
     df_scores = calc_quality_scores(ds_train)
     df_best = find_best_months(df_scores)
-    df_best.to_csv("./TILE_LIST_BEST_MONTHS.csv")
+    root = Path("sample_selection")
+    df_best.to_csv(root / "tile_list_best_months" / "train.csv")
 
     ds_test = fact_func(train=False)
     df_scores_test = calc_quality_scores(ds_test)
     df_best_test = find_best_months(df_scores_test)
-    df_best_test.to_csv("./TILE_LIST_BEST_TEST_MONTHS_v2.csv")
+    df_best.to_csv(root / "tile_list_best_months" / "test.csv")

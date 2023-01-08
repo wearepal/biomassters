@@ -102,7 +102,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         root: Union[Path, str],
         *,
         train: LitTrue,
-        tile_file: Optional[Path] = ...,
+        tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
         preprocess: LitTrue = ...,
@@ -117,7 +117,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         root: Union[Path, str],
         *,
         train: LitTrue = ...,
-        tile_file: Optional[Path] = ...,
+        tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
         preprocess: LitFalse,
@@ -132,7 +132,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         root: Union[Path, str],
         *,
         train: LitFalse,
-        tile_file: Optional[Path] = ...,
+        tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
         preprocess: LitTrue = ...,
@@ -147,7 +147,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         root: Union[Path, str],
         *,
         train: LitFalse,
-        tile_file: Optional[Path] = ...,
+        tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
         preprocess: LitFalse,
@@ -161,7 +161,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         root: Union[Path, str],
         *,
         train: TR = True,
-        tile_file: Optional[Path] = None,
+        tile_dir: Optional[Path] = None,
         group_by: GroupBy = GroupBy.CHIP_MONTH,
         temporal_dim: TemporalDim = 1,
         preprocess: P = True,
@@ -175,7 +175,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         self.n_pp_jobs = n_pp_jobs
         self.input_dir = self.root / (self.TRAIN_DIR_NAME if self.train else self.TEST_DIR_NAME)
         self.target_dir = (self.root / self.TARGET_DIR_NAME) if self.train else None
-        self.tile_file = tile_file
+        self.tile_dir = tile_dir
         self._preprocess = preprocess
 
         if (not self.preprocess) or (not self.is_preprocessed):
@@ -206,16 +206,23 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         return len(self.metadata)
 
     @property
+    def split(self) -> str:
+        return "train" if self.train else "test"
+
+    @property
+    def tile_file(self) -> Optional[Path]:
+        return None if self.tile_dir is None else (self.tile_dir / self.split).with_suffix(".csv")
+
+    @property
     @lru_cache(maxsize=16)
-    def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]"):
+    def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]") -> Path:
         pp_dir_stem = f"group_by={self.group_by.name}"
         if self.group_by is GroupBy.CHIP:
             pp_dir_stem += f"_temporal_dim={self.temporal_dim}"
         if self.tile_file is not None:
             tf_stem = self.tile_file.stem
             pp_dir_stem += f"_tile_file={tf_stem}"
-        split = "train" if self.train else "test"
-        return self.root / "preprocessed" / split / pp_dir_stem
+        return self.root / "preprocessed" / self.split / pp_dir_stem
 
     @property
     @lru_cache(maxsize=16)
