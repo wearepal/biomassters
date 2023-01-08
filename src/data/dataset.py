@@ -77,10 +77,12 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         11: "Aug",
     }
     CHANNEL_MAP: ClassVar[Dict[int, str]] = {
+        # Sentinel1 channels
         0: "S1-VV-Asc: Cband-10m",
         1: "S1-VH-Asc: Cband-10m",
         2: "S1-VV-Desc: Cband-10m",
         3: "S1-VH-Desc: Cband-10m",
+        # Sentinel2 channels
         4: "S2-B2: Blue-10m",
         5: "S2-B3: Green-10m",
         6: "S2-B4: Red-10m",
@@ -92,8 +94,6 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         12: "S2-B11: SWIR-1610nm-20m",
         13: "S2-B12: SWIR-2200nm-20m",
         14: "S2-CLP: CloudProb-160m",
-        15: "S2-NDVI: (NIR-Red)/(NIR+Red) 10m",
-        16: "S1-VV/VH-Asc: Cband-10m",
     }
 
     @overload

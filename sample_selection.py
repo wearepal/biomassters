@@ -1,6 +1,6 @@
 from functools import partial
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, Final, Tuple
 import warnings
 
 import numpy as np
@@ -15,6 +15,26 @@ import src.data.transforms as T
 
 warnings.filterwarnings("ignore", r"All-NaN (slice|axis) encountered")
 
+CHANNEL_MAP: Final[Dict[int, str]] = {
+    0: "S1-VV-Asc: Cband-10m",
+    1: "S1-VH-Asc: Cband-10m",
+    2: "S1-VV-Desc: Cband-10m",
+    3: "S1-VH-Desc: Cband-10m",
+    4: "S2-B2: Blue-10m",
+    5: "S2-B3: Green-10m",
+    6: "S2-B4: Red-10m",
+    7: "S2-B5: VegRed-704nm-20m",
+    8: "S2-B6: VegRed-740nm-20m",
+    9: "S2-B7: VegRed-780nm-20m",
+    10: "S2-B8: NIR-833nm-10m",
+    11: "S2-B8A: NarrowNIR-864nm-20m",
+    12: "S2-B11: SWIR-1610nm-20m",
+    13: "S2-B12: SWIR-2200nm-20m",
+    14: "S2-CLP: CloudProb-160m",
+    15: "S2-NDVI: (NIR-Red)/(NIR+Red) 10m",
+    16: "S1-VV/VH-Asc: Cband-10m",
+}
+
 
 def diff_ndvi_sar_vh(tile: Tensor, *, ndvi_idx: int, vh_idx: int):
     ndvi = minmax_scale(tile[ndvi_idx].clamp(0))
@@ -22,7 +42,7 @@ def diff_ndvi_sar_vh(tile: Tensor, *, ndvi_idx: int, vh_idx: int):
     return ndvi - vh
 
 
-def calc_frac_over_thresh(img: Tensor, thresh: float = 0.5) -> float:
+def calc_frac_over_thresh(img: Tensor, *, thresh: float = 0.5) -> float:
     total_vals = 256 * 256.0
     count_bad = img[np.abs(img) > thresh].shape[0]
     count_bad += np.isnan(img).sum()
@@ -32,10 +52,11 @@ def calc_frac_over_thresh(img: Tensor, thresh: float = 0.5) -> float:
 def calc_quality_scores(dataset: SentinelDataset) -> pd.DataFrame:
     scores = []
     metadata = dataset.metadata.to_numpy()
+    assert dataset.month is not None
     for idx, sample in tqdm(enumerate(iter(dataset)), total=len(dataset)):
-        chipid, month_idx = metadata[idx]
+        chipid, month_idx = dataset.chip[idx], dataset.month[idx]
         tile = sample["image"].detach().clone().cpu()
-        diff_img = diff_ndvi_sar_vh(tile, ndvi_idx=15, vh_idx=12)
+        diff_img = diff_ndvi_sar_vh(tile, ndvi_idx=15, vh_idx=1)
         score = 1 - calc_frac_over_thresh(diff_img, thresh=0.5)
         scores.append((chipid, month_idx, score))
     return pd.DataFrame(scores, columns=["chipid", "month", "score"])
@@ -85,6 +106,7 @@ if __name__ == "__main__":
         root=root,
         group_by=SentinelDataset.GroupBy.CHIP_MONTH,
         transform=transforms,
+        preprocess=False,
     )
     ds_train = fact_func(train=True)
     df_scores = calc_quality_scores(ds_train)
