@@ -28,6 +28,8 @@ __all__ = [
     "Sentinel1Scale",
     "Sentinel2Scale",
     "TensorTransform",
+    "scale_sentinel1_data",
+    "scale_sentinel2_data",
 ]
 
 
@@ -161,21 +163,32 @@ class ClampAGBM(TargetTransform):
         return inputs
 
 
+def scale_sentinel2_data(x: Tensor) -> Tensor:
+    scale_val = 4000.0  # True scaling is [0, 10000], most info is in [0, 4000] range
+    x = x / scale_val
+
+    # CLP values in band 10 are scaled differently than optical bands, [0, 100]
+    if x.ndim == 4:
+        x[:][10] = x[:][10] * scale_val / 100.0
+    else:
+        x[10] = x[10] * scale_val / 100.0
+    return x.clamp(0, 1.0)
+
+
 @dataclass(unsafe_hash=True)
 class Sentinel2Scale(TensorTransform):
     """Scale Sentinel 2 optical channels"""
 
     @override
     def __call__(self, x: Tensor) -> Tensor:
-        scale_val = 4000.0  # True scaling is [0, 10000], most info is in [0, 4000] range
-        x = x / scale_val
+        return scale_sentinel2_data(x)
 
-        # CLP values in band 10 are scaled differently than optical bands, [0, 100]
-        if x.ndim == 4:
-            x[:][10] = x[:][10] * scale_val / 100.0
-        else:
-            x[10] = x[10] * scale_val / 100.0
-        return x.clamp(0, 1.0)
+
+def scale_sentinel1_data(x: Tensor) -> Tensor:
+    s1_max = 20.0  # S1 db values range mostly from -50 to +20 per empirical analysis
+    s1_min = -50.0
+    image = (x - s1_min) / (s1_max - s1_min)
+    return image.clamp(0, 1)
 
 
 @dataclass(unsafe_hash=True)
@@ -184,7 +197,4 @@ class Sentinel1Scale(TensorTransform):
 
     @override
     def __call__(self, x: Tensor) -> Tensor:
-        s1_max = 20.0  # S1 db values range mostly from -50 to +20 per empirical analysis
-        s1_min = -50.0
-        image = (x - s1_min) / (s1_max - s1_min)
-        return image.clamp(0, 1)
+        return scale_sentinel1_data(x)
