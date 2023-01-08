@@ -2,7 +2,7 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 import shutil
-from typing import ClassVar, Generic, Literal, Optional, TypeVar, Union, overload
+from typing import ClassVar, Dict, Generic, Literal, Optional, TypeVar, Union, overload
 import warnings
 
 import joblib  # type: ignore
@@ -19,6 +19,7 @@ from typing_extensions import TypeAlias
 
 from src.data.transforms import (
     InputTransform,
+    TargetTransform,
     scale_sentinel1_data,
     scale_sentinel2_data,
 )
@@ -34,8 +35,8 @@ class SentinelType(Enum):
     S1 = 4
     S2 = 11
 
-    def __init__(self, num_bands: int) -> None:
-        self.num_bands = num_bands
+    def __init__(self, n_channels: int) -> None:
+        self.n_channels = n_channels
 
 
 class GroupBy(Enum):
@@ -61,6 +62,69 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
     TARGET_DIR_NAME: ClassVar[str] = "train_agbm"
     TEST_DIR_NAME: ClassVar[str] = "test_features"
     PP_METADATA_FN: ClassVar[str] = "metadata.csv"
+    MONTH_MAP: ClassVar[Dict[int, str]] = {
+        0: "Sep",
+        1: "Oct",
+        2: "Nov",
+        3: "Dec",
+        4: "Jan",
+        5: "Feb",
+        6: "Mar",
+        7: "Apr",
+        8: "May",
+        9: "Jun",
+        10: "Jul",
+        11: "Aug",
+    }
+    CHANNEL_MAP: ClassVar[Dict[int, str]] = {
+        0: "S1-VV-Asc: Cband-10m",
+        1: "S1-VH-Asc: Cband-10m",
+        2: "S1-VV-Desc: Cband-10m",
+        3: "S1-VH-Desc: Cband-10m",
+        4: "S2-B2: Blue-10m",
+        5: "S2-B3: Green-10m",
+        6: "S2-B4: Red-10m",
+        7: "S2-B5: VegRed-704nm-20m",
+        8: "S2-B6: VegRed-740nm-20m",
+        9: "S2-B7: VegRed-780nm-20m",
+        10: "S2-B8: NIR-833nm-10m",
+        11: "S2-B8A: NarrowNIR-864nm-20m",
+        12: "S2-B11: SWIR-1610nm-20m",
+        13: "S2-B12: SWIR-2200nm-20m",
+        14: "S2-CLP: CloudProb-160m",
+        15: "S2-NDVI: (NIR-Red)/(NIR+Red) 10m",
+        16: "S1-VV/VH-Asc: Cband-10m",
+    }
+
+    @overload
+    def __init__(
+        self,
+        root: Union[Path, str],
+        *,
+        train: LitTrue = ...,
+        tile_file: Optional[Path] = ...,
+        group_by: GroupBy = ...,
+        temporal_dim: TemporalDim = ...,
+        preprocess: P = ...,
+        n_pp_jobs: int = ...,
+        transform: Optional[Union[InputTransform, TargetTransform]] = ...,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self,
+        root: Union[Path, str],
+        *,
+        train: LitFalse,
+        tile_file: Optional[Path] = ...,
+        group_by: GroupBy = ...,
+        temporal_dim: TemporalDim = ...,
+        preprocess: P = ...,
+        n_pp_jobs: int = ...,
+        transform: Optional[InputTransform] = ...,
+    ) -> None:
+        ...
 
     def __init__(
         self,
@@ -71,14 +135,14 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         group_by: GroupBy = GroupBy.CHIP_MONTH,
         temporal_dim: TemporalDim = 1,
         preprocess: P = True,
-        pp_jobs: int = 8,
-        transform: Optional[InputTransform] = None,
+        n_pp_jobs: int = 8,
+        transform: Optional[Union[InputTransform, TargetTransform]] = None,
     ) -> None:
         self.root = Path(root)
         self.train = train
         self.group_by = group_by
         self.temporal_dim = temporal_dim
-        self.n_pp_jobs = pp_jobs
+        self.n_pp_jobs = n_pp_jobs
         self.input_dir = self.root / (self.TRAIN_DIR_NAME if self.train else self.TEST_DIR_NAME)
         self.target_dir = (self.root / self.TARGET_DIR_NAME) if self.train else None
         self.tile_file = tile_file
@@ -114,10 +178,11 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
     @property
     @lru_cache(maxsize=16)
     def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]"):
-        dir_name = f"{'train' if self.train else 'test'}_group_by={self.group_by.name}"
+        stem = f"group_by={self.group_by.name}"
         if self.group_by is GroupBy.CHIP:
-            dir_name += f"_temporal_dim={self.temporal_dim}"
-        return self.root / dir_name
+            stem += f"_temporal_dim={self.temporal_dim}"
+        split = "train" if self.train else "test"
+        return self.root / "preprocessed" / split / stem
 
     @property
     @lru_cache(maxsize=16)
@@ -193,7 +258,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         if filepath.exists():
             return self._read_tif_to_tensor(filepath)
         # Substitute data with zero-padding if the data for the given month is unavailable
-        return torch.zeros((sentinel_type.num_bands, self.RESOLUTION, self.RESOLUTION))
+        return torch.zeros((sentinel_type.n_channels, self.RESOLUTION, self.RESOLUTION))
 
     @overload
     def _load_agbm_tile(self: "SentinelDataset[LitTrue, LitTrue]", chip: int) -> Tensor:

@@ -5,7 +5,6 @@ from typing import (
     List,
     Optional,
     Protocol,
-    Sequence,
     TypeVar,
     Union,
     overload,
@@ -60,9 +59,10 @@ class TargetTransform(Protocol):
 T = TypeVar("T", Union[InputTransform, TargetTransform], InputTransform, TargetTransform)
 
 
-@dataclass(unsafe_hash=True)
+@dataclass(unsafe_hash=True, init=False)
 class Compose(Generic[T]):
-    transforms: Sequence[T]
+    def __init__(self, *transforms: T) -> None:
+        self.transforms = transforms
 
     @overload
     def __call__(self: "Compose[InputTransform]", inputs: S) -> S:
@@ -72,8 +72,12 @@ class Compose(Generic[T]):
     def __call__(self: "Compose[TargetTransform]", inputs: SampleL) -> SampleL:
         ...
 
+    @overload
+    def __call__(self: "Compose[T]", inputs: Union[S, SampleL]) -> Union[S, SampleL]:
+        ...
+
     def __call__(self, inputs):
-        for transform in []:
+        for transform in self.transforms:
             inputs = transform(inputs)  # type: ignore
         return inputs
 
@@ -139,6 +143,7 @@ class AppendRatioAB(InputTransform):
         return sample
 
 
+@dataclass(unsafe_hash=True)
 class AGBMLog1PScale(TargetTransform):
     """Apply ln(x + 1) Scale to AGBM Target Data"""
 
