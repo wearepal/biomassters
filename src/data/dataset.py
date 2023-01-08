@@ -1,10 +1,12 @@
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+import shutil
 from typing import ClassVar, Generic, Literal, Optional, TypeVar, Union, overload
 import warnings
 
 import joblib  # type: ignore
+from loguru import logger
 import numpy as np
 import pandas as pd
 import rasterio  # type: ignore
@@ -64,65 +66,80 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         self,
         root: Union[Path, str],
         *,
-        tile_file: Optional[Path] = None,
         train: TR = True,
-        transform: Optional[InputTransform] = None,
+        tile_file: Optional[Path] = None,
         group_by: GroupBy = GroupBy.CHIP_MONTH,
         temporal_dim: TemporalDim = 1,
         preprocess: P = True,
         pp_jobs: int = 8,
+        transform: Optional[InputTransform] = None,
     ) -> None:
+        self.root = Path(root)
         self.train = train
         self.group_by = group_by
         self.temporal_dim = temporal_dim
         self.n_pp_jobs = pp_jobs
+        self.input_dir = self.root / (self.TRAIN_DIR_NAME if self.train else self.TEST_DIR_NAME)
+        self.target_dir = (self.root / self.TARGET_DIR_NAME) if self.train else None
+        self.tile_file = tile_file
+        self._preprocess = preprocess
 
-        self.root = Path(root)
-        if preprocess:
-            self.input_dir = self.root / self.preprocessed_dir
-            self.metadata = pd.read_csv(self.input_dir / self.PP_METADATA_FN)
-        else:
-            self.input_dir = self.root / (self.TRAIN_DIR_NAME if self.train else self.TEST_DIR_NAME)
-            self.target_dir = (self.root / self.TARGET_DIR_NAME) if self.train else None
-            self.tile_file = tile_file
-
+        if (not self.preprocess) or (not self.is_preprocessed):
             if self.tile_file is None:
-                self.metadata = self._generate_metadata()
+                self.metadata = self._generate_metadata(self.input_dir)
             else:
                 self.metadata = pd.read_csv(self.tile_file, index_col=0)
             # Currrently we sample a chip/month and then sample both data from
             # both satellites; this scheme is very much subject to change. For instance,
             # we might wish to sample by chip and treat the monthly data as a spatiotemporal series.
             self.metadata.drop_duplicates(subset=self.group_by.value, inplace=True)
-            self.chip = self.metadata["chip"].to_numpy()
-            self.month = (
-                self.metadata["month"].to_numpy() if self.group_by is GroupBy.CHIP_MONTH else None
-            )
+        else:
+            self.metadata = pd.read_csv(self.preprocessed_dir / self.PP_METADATA_FN)
+        self.chip = self.metadata["chip"].to_numpy()
+        self.month = (
+            self.metadata["month"].to_numpy() if self.group_by is GroupBy.CHIP_MONTH else None
+        )
+        if self.preprocess and (not self.is_preprocessed):
+            self._preprocess_data()
 
         self.transform = transform
+
+    @property
+    def preprocess(self) -> bool:
+        return self._preprocess
 
     def __len__(self) -> int:
         return len(self.metadata)
 
     @property
     @lru_cache(maxsize=16)
-    def preprocessed_dir(self):
+    def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]"):
         dir_name = f"{'train' if self.train else 'test'}_group_by={self.group_by.name}"
-        if self.group_by.name is GroupBy.CHIP:
+        if self.group_by is GroupBy.CHIP:
             dir_name += f"_temporal_dim={self.temporal_dim}"
         return self.root / dir_name
 
-    def preprocess(self) -> None:
+    @property
+    @lru_cache(maxsize=16)
+    def is_preprocessed(self: "SentinelDataset[TR, LitTrue]") -> bool:
+        return self.preprocessed_dir.exists()
+
+    def _preprocess_data(self) -> None:
         pp_dir = self.preprocessed_dir
         pp_dir.mkdir(parents=True, exist_ok=False)
 
         def _load_save(index: int) -> None:
             torch.save(self._load_unprocessed(index), f=pp_dir / f"{index}.pt")
 
-        with tqdm_joblib(tqdm(desc="Preprocessing", total=len(self))) as pbar:
-            joblib.Parallel(n_jobs=self.n_pp_jobs)(
-                joblib.delayed(_load_save)(index) for index in range(len(self))
-            )
+        try:
+            with tqdm_joblib(tqdm(desc="Preprocessing", total=len(self))) as pbar:
+                joblib.Parallel(n_jobs=self.n_pp_jobs)(
+                    joblib.delayed(_load_save)(index) for index in range(len(self))
+                )
+        except KeyboardInterrupt as e:
+            logger.info(e)
+            shutil.rmtree(pp_dir)
+
         self.metadata.to_csv(pp_dir / self.PP_METADATA_FN)
 
     @property
@@ -191,19 +208,8 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
             target_path = self.target_dir / f"{chip}_agbm.tif"
             return self._read_tif_to_tensor(target_path)
 
-    def _generate_metadata(self) -> pd.DataFrame:
-        filenames = pd.Series(self.input_dir.glob("*.tif"), dtype=str).str.rstrip(".tif")
-        filenames = filenames.str.split("/", expand=True).iloc[:, -1]
-        metadata = filenames.str.split("_", expand=True)
-        metadata.rename(
-            columns={0: "chip", 1: "sentinel", 2: "month"},
-            inplace=True,
-        )
-        metadata.sort_values(by="chip", inplace=True)
-        return metadata
-
-    def _generate_temporal_data(self) -> pd.DataFrame:
-        filenames = pd.Series(self.input_dir.glob("*.tif"), dtype=str).str.rstrip(".tif")
+    def _generate_metadata(self, input_dir: Path) -> pd.DataFrame:
+        filenames = pd.Series(input_dir.glob("*.tif"), dtype=str).str.rstrip(".tif")
         filenames = filenames.str.split("/", expand=True).iloc[:, -1]
         metadata = filenames.str.split("_", expand=True)
         metadata.rename(
@@ -214,11 +220,15 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         return metadata
 
     @overload
-    def _load_unprocessed(self: "SentinelDataset[LitTrue, LitFalse]", index: int) -> SampleL:
+    def _load_unprocessed(self: "SentinelDataset[LitTrue, P]", index: int) -> SampleL:
         ...
 
     @overload
-    def _load_unprocessed(self: "SentinelDataset[LitFalse, LitFalse]", index: int) -> SampleU:
+    def _load_unprocessed(self: "SentinelDataset[LitFalse, P]", index: int) -> SampleU:
+        ...
+
+    @overload
+    def _load_unprocessed(self: "SentinelDataset[TR, P]", index: int) -> Union[SampleU, SampleL]:
         ...
 
     def _load_unprocessed(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
@@ -258,7 +268,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         ...
 
     def _load_preprocessed(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
-        return torch.load(f=self.input_dir / f"{index}.pt")
+        return torch.load(f=self.preprocessed_dir / f"{index}.pt")
 
     @overload
     def __getitem__(self: "SentinelDataset[LitTrue, P]", index: int) -> SampleL:
@@ -266,6 +276,10 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
 
     @overload
     def __getitem__(self: "SentinelDataset[LitFalse, P]", index: int) -> SampleU:
+        ...
+
+    @overload
+    def __getitem__(self: "SentinelDataset[TR, P]", index: int) -> Union[SampleU, SampleL]:
         ...
 
     def __getitem__(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
