@@ -5,6 +5,7 @@ from typing import (
     List,
     Optional,
     Protocol,
+    Tuple,
     TypeVar,
     Union,
     overload,
@@ -82,7 +83,7 @@ class Compose(Generic[T]):
 class DropBands(InputTransform):
     """Drop specified bands by index"""
 
-    bands_to_keep = Optional[List[int]]
+    bands_to_keep: Optional[Union[List[int], Tuple[int, ...]]]
 
     @override
     def __call__(self, inputs: S) -> S:

@@ -15,22 +15,23 @@ import src.data.transforms as T
 
 warnings.filterwarnings("ignore", r"All-NaN (slice|axis) encountered")
 
+
 CHANNEL_MAP: Final[Dict[int, str]] = {
-    0: "S1-VV-Asc: Cband-10m",
-    1: "S1-VH-Asc: Cband-10m",
-    2: "S1-VV-Desc: Cband-10m",
-    3: "S1-VH-Desc: Cband-10m",
-    4: "S2-B2: Blue-10m",
-    5: "S2-B3: Green-10m",
-    6: "S2-B4: Red-10m",
-    7: "S2-B5: VegRed-704nm-20m",
-    8: "S2-B6: VegRed-740nm-20m",
-    9: "S2-B7: VegRed-780nm-20m",
-    10: "S2-B8: NIR-833nm-10m",
-    11: "S2-B8A: NarrowNIR-864nm-20m",
-    12: "S2-B11: SWIR-1610nm-20m",
-    13: "S2-B12: SWIR-2200nm-20m",
-    14: "S2-CLP: CloudProb-160m",
+    0: "S2-B2: Blue-10m",
+    1: "S2-B3: Green-10m",
+    2: "S2-B4: Red-10m",
+    3: "S2-B5: VegRed-704nm-20m",
+    4: "S2-B6: VegRed-740nm-20m",
+    5: "S2-B7: VegRed-780nm-20m",
+    6: "S2-B8: NIR-833nm-10m",
+    7: "S2-B8A: NarrowNIR-864nm-20m",
+    8: "S2-B11: SWIR-1610nm-20m",
+    9: "S2-B12: SWIR-2200nm-20m",
+    10: "S2-CLP: CloudProb-160m",
+    11: "S1-VV-Asc: Cband-10m",
+    12: "S1-VH-Asc: Cband-10m",
+    13: "S1-VV-Desc: Cband-10m",
+    14: "S1-VH-Desc: Cband-10m",
     15: "S2-NDVI: (NIR-Red)/(NIR+Red) 10m",
     16: "S1-VV/VH-Asc: Cband-10m",
 }
@@ -56,7 +57,7 @@ def calc_quality_scores(dataset: SentinelDataset) -> pd.DataFrame:
     for idx, sample in tqdm(enumerate(iter(dataset)), total=len(dataset)):
         chipid, month_idx = dataset.chip[idx], dataset.month[idx]
         tile = sample["image"].detach().clone().cpu()
-        diff_img = diff_ndvi_sar_vh(tile, ndvi_idx=15, vh_idx=1)
+        diff_img = diff_ndvi_sar_vh(tile, ndvi_idx=15, vh_idx=12)
         score = 1 - calc_frac_over_thresh(diff_img, thresh=0.5)
         scores.append((chipid, month_idx, score))
     return pd.DataFrame(scores, columns=["chipid", "month", "score"])
@@ -98,8 +99,8 @@ def find_best_months(df_scores: pd.DataFrame) -> pd.DataFrame:
 if __name__ == "__main__":
     root = Path("/srv/galene0/shared/data/biomassters/")
     transforms = T.Compose(
-        indices.AppendNDVI(index_nir=10, index_red=4),
-        T.AppendRatioAB(index_a=0, index_b=1),  # VV/VH Ascending, index 16
+        indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
+        T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 16
     )
     fact_func = partial(
         SentinelDataset,

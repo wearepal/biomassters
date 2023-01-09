@@ -2,20 +2,35 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 import shutil
-from typing import ClassVar, Dict, Generic, Literal, Optional, TypeVar, Union, overload
+from typing import (
+    ClassVar,
+    Dict,
+    Generic,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    TypeVar,
+    Union,
+    cast,
+    overload,
+)
 import warnings
 
 import joblib  # type: ignore
 from loguru import logger
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
+from ranzen import gcopy
+from ranzen.torch.data import prop_random_split
 import rasterio  # type: ignore
 import rasterio.errors  # type: ignore
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from typing_extensions import TypeAlias
+from typing_extensions import Self, TypeAlias
 
 from src.data.transforms import (
     InputTransform,
@@ -44,8 +59,8 @@ class GroupBy(Enum):
     CHIP_MONTH = ["chip", "month"]
 
 
-TR = TypeVar("TR", LitTrue, LitFalse)
-P = TypeVar("P", LitTrue, LitFalse)
+TR = TypeVar("TR", bound=Literal[True, False])
+P = TypeVar("P", bound=Literal[True, False])
 
 
 TemporalDim: TypeAlias = Literal[0, 1]
@@ -77,23 +92,23 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         11: "Aug",
     }
     CHANNEL_MAP: ClassVar[Dict[int, str]] = {
-        # Sentinel1 channels
-        0: "S1-VV-Asc: Cband-10m",
-        1: "S1-VH-Asc: Cband-10m",
-        2: "S1-VV-Desc: Cband-10m",
-        3: "S1-VH-Desc: Cband-10m",
         # Sentinel2 channels
-        4: "S2-B2: Blue-10m",
-        5: "S2-B3: Green-10m",
-        6: "S2-B4: Red-10m",
-        7: "S2-B5: VegRed-704nm-20m",
-        8: "S2-B6: VegRed-740nm-20m",
-        9: "S2-B7: VegRed-780nm-20m",
-        10: "S2-B8: NIR-833nm-10m",
-        11: "S2-B8A: NarrowNIR-864nm-20m",
-        12: "S2-B11: SWIR-1610nm-20m",
-        13: "S2-B12: SWIR-2200nm-20m",
-        14: "S2-CLP: CloudProb-160m",
+        0: "S2-B2: Blue-10m",
+        1: "S2-B3: Green-10m",
+        2: "S2-B4: Red-10m",
+        3: "S2-B5: VegRed-704nm-20m",
+        4: "S2-B6: VegRed-740nm-20m",
+        5: "S2-B7: VegRed-780nm-20m",
+        6: "S2-B8: NIR-833nm-10m",
+        7: "S2-B8A: NarrowNIR-864nm-20m",
+        8: "S2-B11: SWIR-1610nm-20m",
+        9: "S2-B12: SWIR-2200nm-20m",
+        10: "S2-CLP: CloudProb-160m",
+        # Sentinel1 channels
+        11: "S1-VV-Asc: Cband-10m",
+        12: "S1-VH-Asc: Cband-10m",
+        13: "S1-VV-Desc: Cband-10m",
+        14: "S1-VH-Desc: Cband-10m",
     }
 
     @overload
@@ -105,26 +120,41 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
-        preprocess: LitTrue = ...,
+        preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
         transform: Optional[Union[InputTransform, TargetTransform]] = ...,
     ) -> None:
         ...
 
-    @overload
-    def __init__(
-        self,
-        root: Union[Path, str],
-        *,
-        train: LitTrue = ...,
-        tile_dir: Optional[Path] = ...,
-        group_by: GroupBy = ...,
-        temporal_dim: TemporalDim = ...,
-        preprocess: LitFalse,
-        n_pp_jobs: int = ...,
-        transform: Optional[Union[InputTransform, TargetTransform]] = ...,
-    ) -> None:
-        ...
+    # @overload
+    # def __init__(
+    #     self,
+    #     root: Union[Path, str],
+    #     *,
+    #     train: LitTrue = ...,
+    #     tile_dir: Optional[Path] = ...,
+    #     group_by: GroupBy = ...,
+    #     temporal_dim: TemporalDim = ...,
+    #     preprocess: LitFalse,
+    #     n_pp_jobs: int = ...,
+    #     transform: Optional[Union[InputTransform, TargetTransform]] = ...,
+    # ) -> None:
+    #     ...
+
+    # @overload
+    # def __init__(
+    #     self,
+    #     root: Union[Path, str],
+    #     *,
+    #     train: LitFalse,
+    #     tile_dir: Optional[Path] = ...,
+    #     group_by: GroupBy = ...,
+    #     temporal_dim: TemporalDim = ...,
+    #     preprocess: LitTrue = ...,
+    #     n_pp_jobs: int = ...,
+    #     transform: Optional[InputTransform] = ...,
+    # ) -> None:
+    #     ...
 
     @overload
     def __init__(
@@ -135,22 +165,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
         temporal_dim: TemporalDim = ...,
-        preprocess: LitTrue = ...,
-        n_pp_jobs: int = ...,
-        transform: Optional[InputTransform] = ...,
-    ) -> None:
-        ...
-
-    @overload
-    def __init__(
-        self,
-        root: Union[Path, str],
-        *,
-        train: LitFalse,
-        tile_dir: Optional[Path] = ...,
-        group_by: GroupBy = ...,
-        temporal_dim: TemporalDim = ...,
-        preprocess: LitFalse,
+        preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
         transform: Optional[InputTransform] = ...,
     ) -> None:
@@ -189,6 +204,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
             self.metadata.drop_duplicates(subset=self.group_by.value, inplace=True)
         else:
             self.metadata = pd.read_csv(self.preprocessed_dir / self.PP_METADATA_FN)
+        self.indices = self.metadata.index.to_numpy()
         self.chip = self.metadata["chip"].to_numpy()
         self.month = (
             self.metadata["month"].to_numpy() if self.group_by is GroupBy.CHIP_MONTH else None
@@ -198,12 +214,12 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
 
         self.transform = transform
 
+    def __len__(self) -> int:
+        return len(self.indices)
+
     @property
     def preprocess(self) -> bool:
         return self._preprocess
-
-    def __len__(self) -> int:
-        return len(self.metadata)
 
     @property
     def split(self) -> str:
@@ -355,7 +371,8 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         )
         s2_tile_scaled = scale_sentinel2_data(s2_tile)
 
-        sentinel_tile = torch.cat((s1_tile_scaled, s2_tile_scaled), dim=0)
+        # S2 data first, S1 data second.
+        sentinel_tile = torch.cat((s2_tile_scaled, s1_tile_scaled), dim=0)
         sample: Union[SampleU, SampleL]
         if self.train:
             target_tile = self._load_agbm_tile(chip)
@@ -373,7 +390,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         ...
 
     def _load_preprocessed(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
-        return torch.load(f=self.preprocessed_dir / f"{index}.pt")
+        return torch.load(f=self.preprocessed_dir / f"{self.indices[index]}.pt")
 
     @overload
     def __getitem__(self: "SentinelDataset[LitTrue, P]", index: int) -> SampleL:
@@ -395,3 +412,76 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         if self.transform is not None:
             sample = self.transform(sample)
         return sample
+
+    def make_subset(
+        self,
+        indices: Union[List[int], npt.NDArray[np.uint64], Tensor, slice],
+        *,
+        deep: bool = False,
+    ) -> Self:
+        if isinstance(indices, (np.ndarray, Tensor)):
+            if indices.ndim > 1:
+                raise ValueError("If 'indices' is an array it must be a 0- or 1-dimensional.")
+            indices = cast(List[int], indices.tolist())
+
+        subset = gcopy(self, deep=deep)
+        subset.indices = subset.indices[indices]
+        subset.chip = subset.chip[indices]
+        if subset.month is not None:
+            subset.month = subset.month[indices]
+        subset.metadata = subset.metadata.iloc[indices]
+
+        return subset
+
+    @overload
+    def random_split(
+        self,
+        props: Union[Sequence[float], float],
+        *,
+        deep: bool = ...,
+        as_indices: LitTrue,
+        seed: Optional[int] = ...,
+    ) -> List[List[int]]:
+        ...
+
+    @overload
+    def random_split(
+        self,
+        props: Union[Sequence[float], float],
+        *,
+        deep: bool = ...,
+        as_indices: LitFalse = ...,
+        seed: Optional[int] = ...,
+    ) -> List[Self]:
+        ...
+
+    def random_split(
+        self,
+        props: Union[Sequence[float], float],
+        *,
+        deep: bool = False,
+        as_indices: bool = False,
+        seed: Optional[int] = None,
+    ) -> Union[List[Self], List[List[int]]]:
+        """Randomly split the dataset into subsets according to the given proportions.
+
+        :param dataset: The dataset to split.
+        :param props: The fractional size of each subset into which to randomly split the data.
+            Elements must be non-negative and sum to 1 or less; if less then the size of the final
+            split will be computed by complement.
+
+        :param deep: Whether to create a copy of the underlying dataset as a basis for the random
+            subsets. If False then the data of the subsets will be views of original dataset's data.
+
+        :param as_indices: Whether to return the raw train/test indices instead of subsets of the
+            dataset constructed from them.
+
+        :param seed: PRNG seed to use for splitting the data.
+
+        :returns: Random subsets of the data (or their associated indices) of the requested proportions
+            with residuals.
+        """
+        split_indices = prop_random_split(dataset=self, props=props, as_indices=True, seed=seed)
+        if as_indices:
+            return split_indices
+        return [self.make_subset(indices=indices, deep=deep) for indices in split_indices]
