@@ -76,7 +76,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     init_dim: Optional[int] = None
     init_kernel_size: int = 7
     use_sparse_linear_attn: bool = False
-    mid_spatial_attn: bool = False
+    apply_mid_spatial_attn: bool = True
     resnet_groups: int = 8
     spatial_decoder: bool = True
 
@@ -92,7 +92,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
             init_dim=self.init_dim,
             init_kernel_size=self.init_kernel_size,
             use_sparse_linear_attn=self.use_sparse_linear_attn,
-            mid_spatial_attn=self.mid_spatial_attn,
+            apply_mid_spatial_attn=self.apply_mid_spatial_attn,
             spatial_decoder=self.spatial_decoder,
             resnet_groups=self.resnet_groups,
         )

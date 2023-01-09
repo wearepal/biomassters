@@ -64,8 +64,8 @@ class Residual(nn.Module):
         self.fn = fn
 
     @override
-    def forward(self, x: nn.Module, *args: Any, **kwargs: Any) -> Tensor:
-        return self.fn(x, *args, **kwargs) + x
+    def forward(self, x: nn.Module, **kwargs: Any) -> Tensor:
+        return self.fn(x, **kwargs) + x
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -318,14 +318,20 @@ class Unet3dVd(nn.Module):
         attn_head_dim: int = 32,
         init_dim: Optional[int] = None,
         init_kernel_size: int = 7,
-        use_sparse_linear_attn: bool = False,
-        mid_spatial_attn: bool = False,
+        use_sparse_linear_attn: bool = True,
+        apply_mid_spatial_attn: bool = True,
         resnet_groups: int = 8,
         max_distance: int = 32,
         spatial_decoder: bool = True,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
+        self.out_channels = in_channels if out_channels is None else out_channels
+        # Reduce along the temporal dimension prior to decoding.
+        # For simplicity of implementation, we retain the 3d convs, applying
+        # them over single-frame inputs.
+        self.spatial_decoder = spatial_decoder
+
         # temporal attention and its relative positional encoding
         rotary_emb = RotaryEmbedding(min(32, attn_head_dim))
         temporal_attn = lambda dim: EinopsToAndFrom(
@@ -356,10 +362,6 @@ class Unet3dVd(nn.Module):
 
         # layers
         self.encoder_blocks = nn.ModuleList([])
-        # Reduce along the temporal dimension prior to decoding.
-        # For simplicity of implementation, we retain the 3d convs, applying
-        # them over single-frame inputs.
-        self.spatial_decoder = spatial_decoder
         self.decoder_blocks = nn.ModuleList([])
 
         num_resolutions = len(in_out)
@@ -386,7 +388,7 @@ class Unet3dVd(nn.Module):
         mid_dim = dims[-1]
         self.mid_block1 = ResnetBlock3d(in_dim=mid_dim, out_dim=mid_dim)
 
-        if mid_spatial_attn:
+        if apply_mid_spatial_attn:
             spatial_attn = EinopsToAndFrom(
                 from_einops="b c f h w",
                 to_einops="b f (h w) c",
@@ -421,11 +423,10 @@ class Unet3dVd(nn.Module):
                 )
             )
 
-        out_channels = in_channels if out_channels is None else out_channels
         # Final (2d) conv block operating on temporally-pooled features
         self.final_conv = nn.Sequential(
             ResnetBlock3d(in_dim=dim * 2, out_dim=dim, groups=resnet_groups),
-            nn.Conv3d(in_channels=dim, out_channels=out_channels, kernel_size=1),
+            nn.Conv3d(in_channels=dim, out_channels=self.out_channels, kernel_size=1),
         )
 
     @override
@@ -434,6 +435,8 @@ class Unet3dVd(nn.Module):
         x = self.init_conv(x)
         x = self.init_temporal_attn(x, pos_bias=time_rel_pos_bias)
         r = x.clone()
+        if self.spatial_decoder:
+            r = r.mean(dim=2, keepdim=True)
         h = []
         for block1, block2, spatial_attn, temporal_attn, downsample in self.encoder_blocks:  # type: ignore
             x = block1(x)
@@ -459,7 +462,11 @@ class Unet3dVd(nn.Module):
             x = block1(x)
             x = block2(x)
             x = spatial_attn(x)
-            x = temporal_attn(x, pos_bias=time_rel_pos_bias)
+            x = (
+                temporal_attn(x)
+                if self.spatial_decoder
+                else temporal_attn(x, pos_bias=time_rel_pos_bias)
+            )
             x = upsample(x)
 
         x = torch.cat((x, r), dim=1)
