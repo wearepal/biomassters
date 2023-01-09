@@ -4,7 +4,6 @@ from typing import Any, List, Optional
 __all__ = ["WandbLoggerConf"]
 
 
-
 @dataclass
 class WandbLoggerConf:
     _target_: str = "pytorch_lightning.loggers.wandb.WandbLogger"
@@ -25,4 +24,3 @@ class WandbLoggerConf:
     job_type: Optional[str] = None
     mode: Optional[str] = None
     resume: Optional[str] = None
-

@@ -33,4 +33,3 @@ def to_numpy(tensor: Tensor, *, dtype: Optional[DT] = None) -> Union[npt.NDArray
 
 def to_item(tensor: Tensor) -> Number:
     return tensor.detach().cpu().item()
-
