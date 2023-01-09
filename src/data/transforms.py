@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     ClassVar,
     Generic,
@@ -8,26 +8,31 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    final,
     overload,
     runtime_checkable,
 )
 
 import torch
 from torch import Tensor
+import torch.nn as nn
 from typing_extensions import override
 
-from src.types import TrainSample, ImageSample
+from src.types import ImageSample, TrainSample
 
 __all__ = [
     "AGBMLog1PScale",
     "AppendRatioAB",
     "ClampAGBM",
     "Compose",
+    "DenormalizeModule",
     "DropBands",
     "InputTransform",
+    "MinMaxNormalizeTarget",
     "Sentinel1Scale",
     "Sentinel2Scale",
     "TensorTransform",
+    "ZScoreNormalizeTarget",
     "scale_sentinel1_data",
     "scale_sentinel2_data",
 ]
@@ -59,7 +64,7 @@ T = TypeVar("T", Union[InputTransform, TargetTransform], InputTransform, TargetT
 
 class Compose(Generic[T]):
     def __init__(self, *transforms: T) -> None:
-        self.transforms = transforms
+        self.transforms = list(transforms)
 
     @overload
     def __call__(self: "Compose[InputTransform]", inputs: S) -> S:
@@ -77,6 +82,9 @@ class Compose(Generic[T]):
         for transform in self.transforms:
             inputs = transform(inputs)  # type: ignore
         return inputs
+
+    def __getitem__(self, index: int) -> T:
+        return self.transforms[index]
 
 
 @dataclass(unsafe_hash=True)
@@ -197,3 +205,142 @@ class Sentinel1Scale(TensorTransform):
     @override
     def __call__(self, x: Tensor) -> Tensor:
         return scale_sentinel1_data(x)
+
+
+def eps(data: Tensor) -> float:
+    return torch.finfo(data.dtype).eps
+
+
+@runtime_checkable
+@dataclass(unsafe_hash=True)
+class Normalize(Protocol):
+    inplace: bool = True
+
+    def _maybe_clone(self, data: Tensor) -> Tensor:
+        if not self.inplace:
+            data = data.clone()
+        return data
+
+    def _transform(self, data: Tensor) -> Tensor:
+        """Can be in-place."""
+        ...
+
+    @final
+    def transform(self, data: Tensor) -> Tensor:
+        data = self._maybe_clone(data)
+        return self._transform(data)
+
+    def _inverse_transform(self, data: Tensor) -> Tensor:
+        """Can be in-place."""
+        ...
+
+    @final
+    def inverse_transform(self, data: Tensor) -> Tensor:
+        data = self._maybe_clone(data)
+        return self._inverse_transform(data)
+
+
+@dataclass(unsafe_hash=True)
+class _ZScoreNormalizeMixin:
+    mean: Tensor
+    std: Tensor
+
+
+@dataclass(unsafe_hash=True)
+class _ZScoreNormalize(Normalize, _ZScoreNormalizeMixin):
+    @override
+    def _inverse_transform(self, data: Tensor) -> Tensor:
+        data *= self.std
+        data += self.mean
+        return data
+
+    @override
+    def _transform(self, data: Tensor) -> Tensor:
+        data -= self.mean
+        data /= self.std.clamp_min(data)
+        return data
+
+
+@dataclass(unsafe_hash=True)
+class ZScoreNormalizeInput(_ZScoreNormalize, InputTransform):
+    @override
+    def __call__(self, inputs: S) -> S:
+        inputs["image"] = self.transform(inputs["image"])
+        return inputs
+
+
+@dataclass(unsafe_hash=True)
+class ZScoreNormalizeTarget(_ZScoreNormalize, TargetTransform):
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        inputs["label"] = self.transform(inputs["label"])
+        return inputs
+
+
+@dataclass(unsafe_hash=True)
+class _MinMaxNormalizeMixin:
+    orig_max: float
+    orig_min: float
+    orig_range: float = field(init=False)
+    new_min: float = 0.0
+    new_max: float = 1.0
+    new_range: float = field(init=False)
+
+
+@dataclass(unsafe_hash=True)
+class _MinMaxNormalize(Normalize, _MinMaxNormalizeMixin):
+    orig_range: float = field(init=False)
+    new_min: float = 0.0
+    new_max: float = 1.0
+    new_range: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.new_min > self.new_max:
+            raise ValueError("'new_min' cannot be greater than 'new_max'.")
+        self.new_range = self.new_max - self.new_min
+        self.orig_range = self.orig_max - self.orig_min
+
+    @override
+    def _inverse_transform(self, data: Tensor) -> Tensor:
+        data -= self.new_min
+        data /= self.new_range + eps(data)
+        data *= self.orig_range
+        data += self.orig_min
+        return data
+
+    @override
+    def _transform(self, data: Tensor) -> Tensor:
+        data -= self.orig_min
+        data /= self.orig_range
+        data *= self.new_range
+        data += self.new_min
+        return data
+
+
+@dataclass(unsafe_hash=True)
+class MinMaxNormalizeInput(_MinMaxNormalize, InputTransform):
+    @override
+    def __call__(self, inputs: S) -> S:
+        inputs["image"] = self.transform(inputs["image"])
+        return inputs
+
+
+@dataclass(unsafe_hash=True)
+class MinMaxNormalizeTarget(_MinMaxNormalize, TargetTransform):
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        inputs["label"] = self.transform(inputs["label"])
+        return inputs
+
+
+class DenormalizeModule(nn.Module):
+    def __init__(self, *normalizers: Normalize) -> None:
+        super().__init__()
+        self.normalizers = normalizers
+
+    @override
+    def forward(self, x: Tensor) -> Tensor:
+        if not self.training:
+            for normalizer in self.normalizers:
+                x = normalizer.inverse_transform(x)
+        return x

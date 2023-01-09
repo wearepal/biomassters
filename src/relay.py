@@ -17,7 +17,7 @@ from typing_extensions import override
 
 from src.algorithms.base import Algorithm
 from src.conf import WandbLoggerConf
-from src.data import SentinelDataModule
+from src.data import SentinelDataModule, DenormalizeModule
 from src.models import ModelFactory
 
 __all__ = ["SentinelRelay"]
@@ -72,6 +72,8 @@ class SentinelRelay(Relay):
 
         model_fn: ModelFactory = instantiate(self.model)
         model = model_fn(in_channels=dm.in_channels)
+        model = nn.Sequential(model, DenormalizeModule(*dm.target_normalizers))
+
         # enable parameter sharding with fairscale.
         # Note: when fully-sharded training is not enabled this is a no-op
         try:

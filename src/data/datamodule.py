@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Generic, Optional, Tuple, TypeVar, Union, overload
+from typing import Any, ClassVar, Generic, Optional, Tuple, TypeVar, Union, List
 
 import attr
 from conduit.types import Stage
@@ -37,11 +37,8 @@ class TrainValTestPredSplit(Generic[TD]):
     pred: PredData
 
 
-TP = TypeVar("TP", None, float)
-
-
 @attr.define(kw_only=True, eq=False)
-class SentinelDataModule(pl.LightningDataModule, Generic[TP]):
+class SentinelDataModule(pl.LightningDataModule):
 
     BANDS_TO_KEEP: ClassVar[Tuple[int, ...]] = (
         0,
@@ -72,21 +69,23 @@ class SentinelDataModule(pl.LightningDataModule, Generic[TP]):
     persist_workers: bool = False
     pin_memory: bool = True
 
-    root: Path
+    root: Union[Path, str] = "/srv/galene0/shared/data/biomassters/"
     tile_dir: Optional[Path] = None
     group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP_MONTH
     temporal_dim: int = 1
     preprocess: bool = True
     n_pp_jobs: int = 4
 
+    split_seed: int = 47
+    val_prop: float = 0.2
+    test_prop: Optional[float] = None
+
     _train_data: Optional[TrainData] = attr.field(default=None, init=False)
     _val_data: Optional[EvalData] = attr.field(default=None, init=False)
     _test_data: Optional[EvalData] = attr.field(default=None, init=False)
     _pred_data: Optional[PredData] = attr.field(default=None, init=False)
-
-    split_seed: int = 47
-    val_prop: float = 0.2
-    test_prop: TP = attr.field(default=None)
+    _train_transforms: Optional[TrainTransform] = None
+    _eval_transforms: Optional[EvalTransform] = None
 
     def __attrs_post_init__(self) -> None:
         super().__init__()
@@ -181,33 +180,15 @@ class SentinelDataModule(pl.LightningDataModule, Generic[TP]):
 
     @override
     def val_dataloader(self) -> DataLoader:
-        # loaders = {f"{str(Stage.VALIDATE)}": self._eval_dataloader(ds=self.val_data)}
-        # if with_test and (self._test_data is not None):
-        #     loaders |= {f"{str(Stage.TEST)}": self._eval_dataloader(ds=self.test_data)}
-
-        # return CombinedLoader(loaders, mode="max_size_cycle")
         return self._eval_dataloader(ds=self.val_data)
 
     @override
     def test_dataloader(self) -> DataLoader:
-        # if self._test_data is None:
-        #     loaders = {f"{str(Stage.VALIDATE)}": self._eval_dataloader(ds=self.val_data)}
-        # else:
-        #     loaders = {f"{str(Stage.TEST)}": self._eval_dataloader(ds=self.test_data)}
-        # return CombinedLoader(loaders, mode="max_size_cycle")
         return self._eval_dataloader(ds=self.test_data)
 
     @override
     def predict_dataloader(self) -> DataLoader:
         return self._eval_dataloader(self.pred_data)
-
-    @overload
-    def _get_splits(self: "SentinelDataModule[float]") -> TrainValTestPredSplit[EvalData]:
-        ...
-
-    @overload
-    def _get_splits(self: "SentinelDataModule[None]") -> TrainValTestPredSplit[None]:
-        ...
 
     def _get_splits(self) -> TrainValTestPredSplit:
         train = SentinelDataset(
@@ -310,6 +291,9 @@ class SentinelDataModule(pl.LightningDataModule, Generic[TP]):
             T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 22
             T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
             T.DropBands(self.BANDS_TO_KEEP),  # DROPS ALL BUT SPECIFIED bands_to_keep
+            T.MinMaxNormalizeTarget(
+                orig_min=0.0, orig_max=500, new_min=0.0, new_max=1.0, inplace=True
+            ),
         )
 
     @property
@@ -337,3 +321,17 @@ class SentinelDataModule(pl.LightningDataModule, Generic[TP]):
             T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
             T.DropBands(self.BANDS_TO_KEEP),  # DROPS ALL BUT SPECIFIED bands_to_keep
         )
+
+    @property
+    def target_normalizers(self) -> List[T.Normalize]:
+        def _collect(tform: TrainTransform, *, collected: List[T.Normalize]) -> List[T.Normalize]:
+            # criteria for a target normalizer
+            if isinstance(tform, T.Normalize) and isinstance(tform, T.TargetTransform):
+                collected.append(tform)
+            # recursively traverse Composed transforms
+            elif isinstance(tform, T.Compose):
+                for sub_tform in tform.transforms:
+                    _collect(sub_tform, collected=collected)
+            return collected
+
+        return _collect(self.train_transforms, collected=[])

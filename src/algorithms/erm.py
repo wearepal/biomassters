@@ -32,7 +32,6 @@ class Erm(Algorithm):
     def training_step(self, batch: TrainSample, batch_idx: int) -> Tensor:
         logits = self.forward(batch["image"])
         loss = self.loss_fn(input=logits, target=batch["label"])
-
         results_dict = {f"{str(Stage.FIT)}/batch_loss": to_item(loss)}
         self.log_dict(results_dict)
 

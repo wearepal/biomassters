@@ -4,7 +4,7 @@ from ranzen.hydra import Option
 import torch.multiprocessing
 
 from src.algorithms import Erm
-from src.models import UnetFn, UnetPlusPlusFn, Unet3dVdFn
+from src.models import Unet3dVdFn, UnetFn, UnetPlusPlusFn
 from src.relay import SentinelRelay
 
 if __name__ == "__main__":
