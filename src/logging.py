@@ -1,4 +1,5 @@
 import contextlib
+from typing import Any
 
 import joblib  # type: ignore
 
@@ -13,7 +14,7 @@ def tqdm_joblib(tqdm_object):
     """
 
     class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
-        def __call__(self, *args, **kwargs):
+        def __call__(self, *args: Any, **kwargs: Any) -> None:
             tqdm_object.update(n=self.batch_size)
             return super().__call__(*args, **kwargs)
 
