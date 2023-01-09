@@ -57,9 +57,9 @@ wandb = "*"
 # timm = { git = "https://github.com/rwightman/pytorch-image-models", branch = "main" }
 transformers = "^4.20.1"
 segmentation-models-pytorch = "^0.3.1"
-einops = "^0.4"
-einops-exts = "^0.0.4"
-rotary-embedding-torch = "^0.2.1"
+einops = ">=0.4"
+einops-exts = ">=0.0.4"
+rotary-embedding-torch = ">=0.2.1"
 
 [tool.poetry.group.fsdp]
 optional = true
