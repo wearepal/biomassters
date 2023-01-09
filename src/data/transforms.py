@@ -16,7 +16,7 @@ import torch
 from torch import Tensor
 from typing_extensions import override
 
-from src.types import SampleL, SampleU
+from src.types import TrainSample, ImageSample
 
 __all__ = [
     "AGBMLog1PScale",
@@ -39,7 +39,7 @@ class TensorTransform(Protocol):
         ...
 
 
-S = TypeVar("S", bound=SampleU)
+S = TypeVar("S", bound=ImageSample)
 
 
 @runtime_checkable
@@ -50,7 +50,7 @@ class InputTransform(Protocol):
 
 @runtime_checkable
 class TargetTransform(Protocol):
-    def __call__(self, inputs: SampleL) -> SampleL:
+    def __call__(self, inputs: TrainSample) -> TrainSample:
         ...
 
 
@@ -66,11 +66,11 @@ class Compose(Generic[T]):
         ...
 
     @overload
-    def __call__(self: "Compose[TargetTransform]", inputs: SampleL) -> SampleL:
+    def __call__(self: "Compose[TargetTransform]", inputs: TrainSample) -> TrainSample:
         ...
 
     @overload
-    def __call__(self: "Compose[T]", inputs: Union[S, SampleL]) -> Union[S, SampleL]:
+    def __call__(self: "Compose[T]", inputs: Union[S, TrainSample]) -> Union[S, TrainSample]:
         ...
 
     def __call__(self, inputs):
@@ -144,7 +144,7 @@ class AGBMLog1PScale(TargetTransform):
     """Apply ln(x + 1) Scale to AGBM Target Data"""
 
     @override
-    def __call__(self, inputs: SampleL) -> SampleL:
+    def __call__(self, inputs: TrainSample) -> TrainSample:
         inputs["label"] = torch.log1p(inputs["label"])
         return inputs
 
@@ -159,7 +159,7 @@ class ClampAGBM(TargetTransform):
     "maximum clamp value, 500 is reasonable default per empirical analysis of AGBM data"
 
     @override
-    def __call__(self, inputs: SampleL) -> SampleL:
+    def __call__(self, inputs: TrainSample) -> TrainSample:
         inputs["label"] = torch.clamp(inputs["label"], min=self.vmin, max=self.vmax)
         return inputs
 

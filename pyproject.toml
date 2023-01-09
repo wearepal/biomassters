@@ -32,6 +32,7 @@ wrapt = "<1.14,>=1.11"
 
 [tool.poetry.group.misc.dependencies]
 ranzen = { version = ">=2.0.6" }
+torch-conduit = { git = "https://github.com/wearepal/conduit.git", branch = "main" }
 
 [tool.poetry.group.config.dependencies]
 hydra-core = { version = "^1.2.0" }

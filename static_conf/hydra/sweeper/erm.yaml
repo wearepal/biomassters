@@ -1,0 +1,27 @@
+---
+# @package hydra.sweeper
+sampler:
+    _target_: optuna.samplers.TPESampler
+    seed: 47
+    consider_prior: true
+    prior_weight: 1.0
+    consider_magic_clip: true
+    n_startup_trials: 8
+    n_ei_candidates: 24
+    multivariate: false
+    warn_independent_sampling: true
+
+_target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+direction:
+    - maximize
+storage: null
+study_name: erm
+n_trials: 48
+n_jobs: 1
+max_failure_rate: 0.0
+search_space: null
+custom_search_space: null
+
+params:
+    alg.weight_decay: tag(log, interval(1.e-8, 1))
+    alg.lr: tag(log, interval(1.e-5, 1.e-3))

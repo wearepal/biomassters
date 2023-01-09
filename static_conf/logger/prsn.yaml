@@ -1,0 +1,16 @@
+---
+defaults:
+  - /schema/logger: base
+  - _self_
+name: null
+offline: false
+id: null
+anonymous: null
+version: null
+log_model: false
+experiment: null
+prefix: ''
+entity: null
+project: biomassters
+group: null
+tags: []

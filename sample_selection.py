@@ -112,8 +112,9 @@ if __name__ == "__main__":
     ds_train = fact_func(train=True)
     df_scores = calc_quality_scores(ds_train)
     df_best = find_best_months(df_scores)
-    root = Path("sample_selection")
-    df_best.to_csv(root / "tile_list_best_months" / "train.csv")
+    save_dir = Path("sample_selection", "tile_list_best_months")
+    save_dir.mkdir(parents=True)
+    df_best.to_csv(save_dir / "train.csv")
 
     ds_test = fact_func(train=False)
     df_scores_test = calc_quality_scores(ds_test)

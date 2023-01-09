@@ -5,7 +5,6 @@ from typing import Any, ClassVar, Generic, Optional, Tuple, TypeVar, Union, over
 import attr
 from conduit.types import Stage
 import pytorch_lightning as pl
-from pytorch_lightning.trainer.supporters import CombinedLoader
 from ranzen.torch import SequentialBatchSampler, TrainingMode
 from torch.utils.data import DataLoader
 from torchgeo.transforms import indices
@@ -105,6 +104,10 @@ class SentinelDataModule(pl.LightningDataModule, Generic[TP]):
         return self._train_data
 
     @property
+    def in_channels(self) -> int:
+        return self.train_data.in_channels
+
+    @property
     def val_data(self) -> EvalData:
         self._check_setup_called()
         assert self._val_data is not None
@@ -177,20 +180,22 @@ class SentinelDataModule(pl.LightningDataModule, Generic[TP]):
         )
 
     @override
-    def val_dataloader(self, with_test: bool = False) -> CombinedLoader:
-        loaders = {f"{str(Stage.VALIDATE)}": self._eval_dataloader(ds=self.val_data)}
-        if with_test and (self._test_data is not None):
-            loaders |= {f"{str(Stage.TEST)}": self._eval_dataloader(ds=self.test_data)}
+    def val_dataloader(self) -> DataLoader:
+        # loaders = {f"{str(Stage.VALIDATE)}": self._eval_dataloader(ds=self.val_data)}
+        # if with_test and (self._test_data is not None):
+        #     loaders |= {f"{str(Stage.TEST)}": self._eval_dataloader(ds=self.test_data)}
 
-        return CombinedLoader(loaders, mode="max_size_cycle")
+        # return CombinedLoader(loaders, mode="max_size_cycle")
+        return self._eval_dataloader(ds=self.val_data)
 
     @override
-    def test_dataloader(self) -> CombinedLoader:
-        if self._test_data is None:
-            loaders = {f"{str(Stage.VALIDATE)}": self._eval_dataloader(ds=self.val_data)}
-        else:
-            loaders = {f"{str(Stage.TEST)}": self._eval_dataloader(ds=self.test_data)}
-        return CombinedLoader(loaders, mode="max_size_cycle")
+    def test_dataloader(self) -> DataLoader:
+        # if self._test_data is None:
+        #     loaders = {f"{str(Stage.VALIDATE)}": self._eval_dataloader(ds=self.val_data)}
+        # else:
+        #     loaders = {f"{str(Stage.TEST)}": self._eval_dataloader(ds=self.test_data)}
+        # return CombinedLoader(loaders, mode="max_size_cycle")
+        return self._eval_dataloader(ds=self.test_data)
 
     @override
     def predict_dataloader(self) -> DataLoader:

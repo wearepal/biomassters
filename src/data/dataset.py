@@ -39,7 +39,7 @@ from src.data.transforms import (
     scale_sentinel2_data,
 )
 from src.logging import tqdm_joblib
-from src.types import LitFalse, LitTrue, SampleL, SampleU
+from src.types import LitFalse, LitTrue, TestSample, TrainSample
 
 warnings.filterwarnings("ignore", category=rasterio.errors.NotGeoreferencedWarning)
 
@@ -66,7 +66,7 @@ P = TypeVar("P", bound=Literal[True, False])
 TemporalDim: TypeAlias = Literal[0, 1]
 
 
-class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
+class SentinelDataset(Dataset, Generic[TR, P]):
     """Sentinel 1 & 2 dataset."""
 
     SentinelType: TypeAlias = SentinelType
@@ -125,36 +125,6 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         transform: Optional[Union[InputTransform, TargetTransform]] = ...,
     ) -> None:
         ...
-
-    # @overload
-    # def __init__(
-    #     self,
-    #     root: Union[Path, str],
-    #     *,
-    #     train: LitTrue = ...,
-    #     tile_dir: Optional[Path] = ...,
-    #     group_by: GroupBy = ...,
-    #     temporal_dim: TemporalDim = ...,
-    #     preprocess: LitFalse,
-    #     n_pp_jobs: int = ...,
-    #     transform: Optional[Union[InputTransform, TargetTransform]] = ...,
-    # ) -> None:
-    #     ...
-
-    # @overload
-    # def __init__(
-    #     self,
-    #     root: Union[Path, str],
-    #     *,
-    #     train: LitFalse,
-    #     tile_dir: Optional[Path] = ...,
-    #     group_by: GroupBy = ...,
-    #     temporal_dim: TemporalDim = ...,
-    #     preprocess: LitTrue = ...,
-    #     n_pp_jobs: int = ...,
-    #     transform: Optional[InputTransform] = ...,
-    # ) -> None:
-    #     ...
 
     @overload
     def __init__(
@@ -252,6 +222,7 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         def _load_save(index: int) -> None:
             torch.save(self._load_unprocessed(index), f=pp_dir / f"{index}.pt")
 
+        logger.info(f"Starting data-preprocessing with output directory '{pp_dir.resolve()}'.")
         try:
             with tqdm_joblib(tqdm(desc="Preprocessing", total=len(self))):
                 joblib.Parallel(n_jobs=self.n_pp_jobs)(
@@ -262,12 +233,16 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
             shutil.rmtree(pp_dir)
 
         self.metadata.to_csv(pp_dir / self.PP_METADATA_FN)
+        logger.info(
+            f"Preprocessing complete! Preprocessed data has been saved to '{pp_dir.resolve()}'."
+        )
 
     @property
     @lru_cache(maxsize=16)
     def channel_dim(self) -> int:
         return 1 - self.temporal_dim if self.group_by is GroupBy.CHIP else 0
 
+    @property
     def in_channels(self) -> int:
         return self[0]["image"].size(self.channel_dim)
 
@@ -341,18 +316,22 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
         return metadata
 
     @overload
-    def _load_unprocessed(self: "SentinelDataset[LitTrue, P]", index: int) -> SampleL:
+    def _load_unprocessed(self: "SentinelDataset[LitTrue, P]", index: int) -> TrainSample:
         ...
 
     @overload
-    def _load_unprocessed(self: "SentinelDataset[LitFalse, P]", index: int) -> SampleU:
+    def _load_unprocessed(self: "SentinelDataset[LitFalse, P]", index: int) -> TestSample[str]:
         ...
 
     @overload
-    def _load_unprocessed(self: "SentinelDataset[TR, P]", index: int) -> Union[SampleU, SampleL]:
+    def _load_unprocessed(
+        self: "SentinelDataset[TR, P]", index: int
+    ) -> Union[TestSample[str], TrainSample]:
         ...
 
-    def _load_unprocessed(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
+    def _load_unprocessed(
+        self: "SentinelDataset", index: int
+    ) -> Union[TestSample[str], TrainSample]:
         chip = self.chip[index]
         month = None if self.month is None else self.month[index]
         # Load in the Sentinel1 imagery.
@@ -373,38 +352,44 @@ class SentinelDataset(Dataset[SampleU], Generic[TR, P]):
 
         # S2 data first, S1 data second.
         sentinel_tile = torch.cat((s2_tile_scaled, s1_tile_scaled), dim=0)
-        sample: Union[SampleU, SampleL]
+        sample: Union[TestSample[str], TrainSample]
         if self.train:
             target_tile = self._load_agbm_tile(chip)
             sample = {"image": sentinel_tile, "label": target_tile}
         else:
-            sample = {"image": sentinel_tile}
+            sample = {"image": sentinel_tile, "chip": chip}
         return sample
 
     @overload
-    def _load_preprocessed(self: "SentinelDataset[LitTrue, LitTrue]", index: int) -> SampleL:
+    def _load_preprocessed(self: "SentinelDataset[LitTrue, LitTrue]", index: int) -> TrainSample:
         ...
 
     @overload
-    def _load_preprocessed(self: "SentinelDataset[LitFalse, LitTrue]", index: int) -> SampleU:
+    def _load_preprocessed(
+        self: "SentinelDataset[LitFalse, LitTrue]", index: int
+    ) -> TestSample[str]:
         ...
 
-    def _load_preprocessed(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
+    def _load_preprocessed(
+        self: "SentinelDataset", index: int
+    ) -> Union[TestSample[str], TrainSample]:
         return torch.load(f=self.preprocessed_dir / f"{self.indices[index]}.pt")
 
     @overload
-    def __getitem__(self: "SentinelDataset[LitTrue, P]", index: int) -> SampleL:
+    def __getitem__(self: "SentinelDataset[LitTrue, P]", index: int) -> TrainSample:
         ...
 
     @overload
-    def __getitem__(self: "SentinelDataset[LitFalse, P]", index: int) -> SampleU:
+    def __getitem__(self: "SentinelDataset[LitFalse, P]", index: int) -> TestSample[str]:
         ...
 
     @overload
-    def __getitem__(self: "SentinelDataset[TR, P]", index: int) -> Union[SampleU, SampleL]:
+    def __getitem__(
+        self: "SentinelDataset[TR, P]", index: int
+    ) -> Union[TestSample[str], TrainSample]:
         ...
 
-    def __getitem__(self: "SentinelDataset", index: int) -> Union[SampleU, SampleL]:
+    def __getitem__(self: "SentinelDataset", index: int) -> Union[TestSample[str], TrainSample]:
         if self.preprocess:
             sample = self._load_preprocessed(index)
         else:
