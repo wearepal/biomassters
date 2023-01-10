@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Generic, Optional, Tuple, TypeVar, Union, List
+from typing import Any, ClassVar, Generic, List, Optional, Tuple, TypeVar, Union
 
 import attr
 from conduit.types import Stage
@@ -71,8 +71,7 @@ class SentinelDataModule(pl.LightningDataModule):
 
     root: Union[Path, str] = "/srv/galene0/shared/data/biomassters/"
     tile_dir: Optional[Path] = None
-    group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP_MONTH
-    temporal_dim: int = 1
+    group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP
     preprocess: bool = True
     n_pp_jobs: int = 4
 
@@ -267,10 +266,13 @@ class SentinelDataModule(pl.LightningDataModule):
 
     @property
     def _default_train_transforms(self) -> TrainTransform:
+        # NOTE: torchgeo's indices are appended to dim -3, meaning we have to
+        # transpose the temporal and spatial dims prior to (and after) applying
+        # them.
+        transpose = T.Transpose(0, 1) if self.is_spatiotemporal else T.Identity()
         return T.Compose(
-            T.ClampAGBM(
-                vmin=0.0, vmax=500.0
-            ),  # exclude AGBM outliers, 500 is good upper limit per AGBM histograms
+            # -- Input transforms --
+            transpose,
             indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
             indices.AppendNormalizedDifferenceIndex(
                 index_a=11, index_b=12
@@ -290,16 +292,30 @@ class SentinelDataModule(pl.LightningDataModule):
             ),  # Standardized Water-Level Index for water detection, index 21
             T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 22
             T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
-            T.DropBands(self.BANDS_TO_KEEP),  # DROPS ALL BUT SPECIFIED bands_to_keep
+            transpose,
+            T.DropBands(self.BANDS_TO_KEEP, slice_dim=0),  # DROPS ALL BUT SPECIFIED bands_to_keep
+            # -- Target transforms --
+            T.ClampAGBM(
+                vmin=0.0, vmax=500.0
+            ),  # exclude AGBM outliers, 500 is good upper limit per AGBM histograms
             T.MinMaxNormalizeTarget(
                 orig_min=0.0, orig_max=500, new_min=0.0, new_max=1.0, inplace=True
             ),
         )
 
     @property
+    def is_spatiotemporal(self) -> bool:
+        return self.group_by is SentinelDataset.GroupBy.CHIP
+
+    @property
     def _default_eval_transforms(self) -> EvalTransform:
-        # Same as _default_train_transforms save for the target transform, ClampAGBM.
+        # NOTE: torchgeo's indices are appended to dim -3, meaning we have to
+        # transpose the temporal and spatial dims prior to (and after) applying
+        # them.
+        transpose = T.Transpose(0, 1) if self.is_spatiotemporal else T.Identity()
+        # Same input transforms as defined in _default_train_transforms
         return T.Compose(
+            transpose,
             indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
             indices.AppendNormalizedDifferenceIndex(
                 index_a=11, index_b=12
@@ -319,7 +335,8 @@ class SentinelDataModule(pl.LightningDataModule):
             ),  # Standardized Water-Level Index for water detection, index 21
             T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 22
             T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
-            T.DropBands(self.BANDS_TO_KEEP),  # DROPS ALL BUT SPECIFIED bands_to_keep
+            transpose,
+            T.DropBands(self.BANDS_TO_KEEP, slice_dim=0),  # DROPS ALL BUT SPECIFIED bands_to_keep
         )
 
     @property

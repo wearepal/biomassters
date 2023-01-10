@@ -79,7 +79,7 @@ class Algorithm(pl.LightningModule):
     @torch.no_grad()
     def validation_epoch_end(self, outputs: List[Tensor]) -> None:
         results_dict = self._epoch_end(outputs=outputs, stage=Stage.VALIDATE)
-        self.log_dict(results_dict)
+        self.log_dict(results_dict, sync_dist=True)
 
     @override
     @torch.no_grad()
@@ -95,7 +95,7 @@ class Algorithm(pl.LightningModule):
     @torch.no_grad()
     def test_epoch_end(self, outputs: List[Tensor]) -> None:
         results_dict = self._epoch_end(outputs=outputs, stage=Stage.TEST)
-        self.log_dict(results_dict)
+        self.log_dict(results_dict, sync_dist=True)
 
     @override
     def predict_step(

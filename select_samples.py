@@ -114,7 +114,7 @@ if __name__ == "__main__":
     # df_best_train = find_best_months(df_scores_train)
 
     save_dir = Path("sample_selection", "tile_list_best_months")
-    save_dir.mkdir(parents=True)
+    save_dir.mkdir(parents=True, exist_ok=True)
     # df_best_train.to_csv(save_dir / "train.csv")
 
     ds_test = fact_func(train=False)

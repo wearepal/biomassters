@@ -27,11 +27,15 @@ __all__ = [
     "Compose",
     "DenormalizeModule",
     "DropBands",
+    "Identity",
     "InputTransform",
     "MinMaxNormalizeTarget",
+    "MoveDim",
+    "Permute",
     "Sentinel1Scale",
     "Sentinel2Scale",
     "TensorTransform",
+    "Transpose",
     "ZScoreNormalizeTarget",
     "scale_sentinel1_data",
     "scale_sentinel2_data",
@@ -92,22 +96,25 @@ class DropBands(InputTransform):
     """Drop specified bands by index"""
 
     bands_to_keep: Optional[Union[List[int], Tuple[int, ...]]]
+    slice_dim: Optional[int] = 0
 
     @override
     def __call__(self, inputs: S) -> S:
         if self.bands_to_keep is None:
             return inputs
 
-        X = inputs["image"].detach()
-        if X.ndim == 4:
+        x = inputs["image"]
+        if self.slice_dim is not None:
+            slice_dim = self.slice_dim
+        elif x.ndim > 3:
             slice_dim = 1
         else:
             slice_dim = 0
-        inputs["image"] = X.index_select(
+        inputs["image"] = x.index_select(
             slice_dim,
             torch.tensor(
                 self.bands_to_keep,
-                device=inputs["image"].device,
+                device=x.device,
             ),
         )
         return inputs
@@ -336,7 +343,7 @@ class MinMaxNormalizeTarget(_MinMaxNormalize, TargetTransform):
 class DenormalizeModule(nn.Module):
     def __init__(self, *normalizers: Normalize) -> None:
         super().__init__()
-        self.normalizers = normalizers
+        self.normalizers = reversed(list(normalizers))
 
     @override
     def forward(self, x: Tensor) -> Tensor:
@@ -344,3 +351,46 @@ class DenormalizeModule(nn.Module):
             for normalizer in self.normalizers:
                 x = normalizer.inverse_transform(x)
         return x
+
+
+@dataclass(unsafe_hash=True)
+class Transpose(InputTransform):
+    dim0: int
+    dim1: int
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        inputs["image"] = inputs["image"].transpose(dim0=self.dim0, dim1=self.dim1)
+        return inputs
+
+
+@dataclass(unsafe_hash=True)
+class MoveDim(InputTransform):
+    source: int
+    destination: int
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        inputs["image"] = inputs["image"].movedim(source=self.source, destination=self.destination)
+        return inputs
+
+
+@dataclass(unsafe_hash=True, init=False)
+class Permute(InputTransform):
+    def __init__(self, *dims: int) -> None:
+        self.dims = dims
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        inputs["image"] = inputs["image"].permute(self.dims)
+        return inputs
+
+
+@dataclass(unsafe_hash=True, init=False)
+class Identity(InputTransform):
+    def __init__(self, *dims: int) -> None:
+        self.dims = dims
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        return inputs
