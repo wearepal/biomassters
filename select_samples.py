@@ -109,14 +109,15 @@ if __name__ == "__main__":
         transform=transforms,
         preprocess=False,
     )
-    ds_train = fact_func(train=True)
-    df_scores = calc_quality_scores(ds_train)
-    df_best = find_best_months(df_scores)
+    # ds_train = fact_func(train=True)
+    # df_scores_train = calc_quality_scores(ds_train)
+    # df_best_train = find_best_months(df_scores_train)
+
     save_dir = Path("sample_selection", "tile_list_best_months")
     save_dir.mkdir(parents=True)
-    df_best.to_csv(save_dir / "train.csv")
+    # df_best_train.to_csv(save_dir / "train.csv")
 
     ds_test = fact_func(train=False)
     df_scores_test = calc_quality_scores(ds_test)
     df_best_test = find_best_months(df_scores_test)
-    df_best.to_csv(root / "tile_list_best_months" / "test.csv")
+    df_best_test.to_csv(save_dir / "test.csv")
