@@ -55,12 +55,12 @@ def calc_quality_scores(dataset: SentinelDataset) -> pd.DataFrame:
     metadata = dataset.metadata.to_numpy()
     assert dataset.month is not None
     for idx, sample in tqdm(enumerate(iter(dataset)), total=len(dataset)):
-        chipid, month_idx = dataset.chip[idx], dataset.month[idx]
+        chip, month_idx = dataset.chip[idx], dataset.month[idx]
         tile = sample["image"].detach().clone().cpu()
         diff_img = diff_ndvi_sar_vh(tile, ndvi_idx=15, vh_idx=12)
         score = 1 - calc_frac_over_thresh(diff_img, thresh=0.5)
-        scores.append((chipid, month_idx, score))
-    return pd.DataFrame(scores, columns=["chipid", "month", "score"])
+        scores.append((chip, month_idx, score))
+    return pd.DataFrame(scores, columns=["chip", "month", "score"])
 
 
 def find_best_month_score(
@@ -90,10 +90,10 @@ def find_best_month_score(
 
 def find_best_months(df_scores: pd.DataFrame) -> pd.DataFrame:
     best_months = []
-    for chipid in tqdm(df_scores["chipid"].unique()):
-        idx, score = find_best_month_score(df_scores[df_scores["chipid"] == chipid]["score"].values)
-        best_months.append((chipid, idx, score))
-    return pd.DataFrame(best_months, columns=["chipid", "month", "score"])
+    for chip in tqdm(df_scores["chip"].unique()):
+        idx, score = find_best_month_score(df_scores[df_scores["chip"] == chip]["score"].values)
+        best_months.append((chip, idx, score))
+    return pd.DataFrame(best_months, columns=["chip", "month", "score"])
 
 
 if __name__ == "__main__":
@@ -108,14 +108,15 @@ if __name__ == "__main__":
         group_by=SentinelDataset.GroupBy.CHIP_MONTH,
         transform=transforms,
         preprocess=False,
+        missing_value=SentinelDataset.MissingValue.NAN,
     )
-    # ds_train = fact_func(train=True)
-    # df_scores_train = calc_quality_scores(ds_train)
-    # df_best_train = find_best_months(df_scores_train)
+    ds_train = fact_func(train=True)
+    df_scores_train = calc_quality_scores(ds_train)
+    df_best_train = find_best_months(df_scores_train)
 
     save_dir = Path("sample_selection", "tile_list_best_months")
     save_dir.mkdir(parents=True, exist_ok=True)
-    # df_best_train.to_csv(save_dir / "train.csv")
+    df_best_train.to_csv(save_dir / "train.csv")
 
     ds_test = fact_func(train=False)
     df_scores_test = calc_quality_scores(ds_test)

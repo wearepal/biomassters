@@ -66,11 +66,17 @@ P = TypeVar("P", bound=Literal[True, False])
 TemporalDim: TypeAlias = Literal[0, 1]
 
 
+class MissingValue(Enum):
+    ZERO = 0.0
+    NAN = torch.nan
+
+
 class SentinelDataset(Dataset, Generic[TR, P]):
     """Sentinel 1 & 2 dataset."""
 
     SentinelType: TypeAlias = SentinelType
     GroupBy: TypeAlias = GroupBy
+    MissingValue: TypeAlias = MissingValue
 
     RESOLUTION: ClassVar[int] = 256
     TRAIN_DIR_NAME: ClassVar[str] = "train_features"
@@ -110,6 +116,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         13: "S1-VV-Desc: Cband-10m",
         14: "S1-VH-Desc: Cband-10m",
     }
+    INVERSE_CHANNEL_MAP = dict(zip(CHANNEL_MAP.values(), CHANNEL_MAP.keys()))
 
     @overload
     def __init__(
@@ -123,6 +130,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
         transform: Optional[Union[InputTransform, TargetTransform]] = ...,
+        missing_value: MissingValue = ...,
     ) -> None:
         ...
 
@@ -138,6 +146,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
         transform: Optional[InputTransform] = ...,
+        missing_value: MissingValue = ...,
     ) -> None:
         ...
 
@@ -152,11 +161,13 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         preprocess: P = True,
         n_pp_jobs: int = 8,
         transform: Optional[Union[InputTransform, TargetTransform]] = None,
+        missing_value: MissingValue = MissingValue.ZERO,
     ) -> None:
         self.root = Path(root)
         self.train = train
         self.group_by = group_by
         self.temporal_dim = temporal_dim
+        self.missing_value = missing_value
         self.n_pp_jobs = n_pp_jobs
         self.input_dir = self.root / (self.TRAIN_DIR_NAME if self.train else self.TEST_DIR_NAME)
         self.target_dir = (self.root / self.TARGET_DIR_NAME) if self.train else None
@@ -168,6 +179,9 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 self.metadata = self._generate_metadata(self.input_dir)
             else:
                 self.metadata = pd.read_csv(self.tile_file, index_col=0)
+            # Rename 'chipid' for backwards compatibility.
+            if "chipid" in self.metadata.columns:
+                self.metadata.rename({"chipid": "chip"}, axis=1, inplace=True)
             # Currrently we sample a chip/month and then sample both data from
             # both satellites; this scheme is very much subject to change. For instance,
             # we might wish to sample by chip and treat the monthly data as a spatiotemporal series.
@@ -271,6 +285,15 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             )
         return tif
 
+    def _missing_data(self, sentinel_type: SentinelType) -> Tensor:
+        # Currently this funtion just produces constant-padding -- we might want to
+        # investigate more sophisticated schemes (it might be wiser to set the
+        # the CloudProb band to 1s, for instance).
+        return torch.full(
+            (sentinel_type.n_channels, self.RESOLUTION, self.RESOLUTION),
+            fill_value=self.missing_value.value,
+        )
+
     def _load_sentinel_tiles(
         self: "SentinelDataset",
         sentinel_type: SentinelType,
@@ -288,8 +311,9 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         filepath = self.input_dir / filename
         if filepath.exists():
             return self._read_tif_to_tensor(filepath)
-        # Substitute data with zero-padding if the data for the given month is unavailable
-        return torch.zeros((sentinel_type.n_channels, self.RESOLUTION, self.RESOLUTION))
+
+        # Substitute data with padding if the data for the given month is unavailable
+        return self._missing_data(sentinel_type=sentinel_type)
 
     @overload
     def _load_agbm_tile(self: "SentinelDataset[LitTrue, LitTrue]", chip: int) -> Tensor:
