@@ -55,10 +55,9 @@ class Algorithm(pl.LightningModule):
         ...
 
     @torch.no_grad()
-    def inference_step(self, batch: TrainSample) -> Tensor:
+    def eval_step(self, batch: TrainSample) -> Tensor:
         preds = self.forward(batch["image"])
-        per_sample_l2 = (preds - batch["label"]).pow(2).flatten(start_dim=1).mean(1)
-        return per_sample_l2
+        return (preds - batch["label"]).pow(2).flatten(start_dim=1).mean(1)
 
     @override
     @torch.no_grad()
@@ -68,17 +67,17 @@ class Algorithm(pl.LightningModule):
         batch_idx: int,
         dataloader_idx: Optional[int] = None,
     ) -> Tensor:
-        return self.inference_step(batch=batch)
+        return self.eval_step(batch=batch)
 
-    def _epoch_end(self, outputs: List[Tensor], *, stage: Stage) -> MetricDict:
-        mse: Tensor = torch.cat(outputs, dim=0).mean().sqrt()
+    def _eval_epoch_end(self, outputs: List[Tensor], *, stage: Stage) -> MetricDict:
+        mse: Tensor = torch.cat(outputs, dim=0).mean()
         rmse = to_item(mse.sqrt())
         return {f"{str(stage)}": rmse}
 
     @override
     @torch.no_grad()
     def validation_epoch_end(self, outputs: List[Tensor]) -> None:
-        results_dict = self._epoch_end(outputs=outputs, stage=Stage.VALIDATE)
+        results_dict = self._eval_epoch_end(outputs=outputs, stage=Stage.VALIDATE)
         self.log_dict(results_dict, sync_dist=True)
 
     @override
@@ -89,12 +88,12 @@ class Algorithm(pl.LightningModule):
         batch_idx: int,
         dataloader_idx: Optional[int] = None,
     ) -> Tensor:
-        return self.inference_step(batch=batch)
+        return self.eval_step(batch=batch)
 
     @override
     @torch.no_grad()
     def test_epoch_end(self, outputs: List[Tensor]) -> None:
-        results_dict = self._epoch_end(outputs=outputs, stage=Stage.TEST)
+        results_dict = self._eval_epoch_end(outputs=outputs, stage=Stage.TEST)
         self.log_dict(results_dict, sync_dist=True)
 
     @override
