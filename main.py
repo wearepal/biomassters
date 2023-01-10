@@ -9,12 +9,14 @@ from src.relay import SentinelRelay
 
 if __name__ == "__main__":
     TO_IGNORE = (
+        "torch.nn.modules.module",
+        "torch.distributed.distributed_c10d",
         "pytorch_lightning.trainer.connectors.data_connector",
         "lightning_lite.plugins.environments.slurm",
     )
     for module in TO_IGNORE:
         warnings.filterwarnings("ignore", module=module)
-        torch.multiprocessing.set_sharing_strategy("file_system")
+    torch.multiprocessing.set_sharing_strategy("file_system")
 
     alg_ops = [
         Option(Erm, "erm"),
