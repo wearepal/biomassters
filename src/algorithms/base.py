@@ -57,7 +57,7 @@ class Algorithm(pl.LightningModule):
     @torch.no_grad()
     def eval_step(self, batch: TrainSample) -> Tensor:
         preds = self.forward(batch["image"])
-        return (preds - batch["label"]).pow(2).flatten(start_dim=1).mean(1)
+        return (preds - batch["label"]).pow(2).flatten(start_dim=1).mean(1).cpu()
 
     @override
     @torch.no_grad()
@@ -70,7 +70,7 @@ class Algorithm(pl.LightningModule):
         return self.eval_step(batch=batch)
 
     def _eval_epoch_end(self, outputs: List[Tensor], *, stage: Stage) -> MetricDict:
-        mse: Tensor = torch.cat(outputs, dim=0).mean()
+        mse: Tensor = torch.cat(outputs, dim=0).mean().to(dtype=torch.float32)
         rmse = to_item(mse.sqrt())
         return {f"{str(stage)}": rmse}
 
