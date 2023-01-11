@@ -68,12 +68,18 @@ class MissingValue(Enum):
     NAN = torch.nan
 
 
+class SaveWith(Enum):
+    NP = "np"
+    TORCH = "torch"
+
+
 class SentinelDataset(Dataset, Generic[TR, P]):
     """Sentinel 1 & 2 dataset."""
 
     SentinelType: TypeAlias = SentinelType
     GroupBy: TypeAlias = GroupBy
     MissingValue: TypeAlias = MissingValue
+    SaveWith: TypeAlias = SaveWith
 
     RESOLUTION: ClassVar[int] = 256
     CHANNEL_DIM: ClassVar[int] = 0
@@ -130,6 +136,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         n_pp_jobs: int = ...,
         transform: Optional[Union[InputTransform, TargetTransform]] = ...,
         missing_value: MissingValue = ...,
+        save_with: SaveWith = ...,
     ) -> None:
         ...
 
@@ -145,6 +152,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         n_pp_jobs: int = ...,
         transform: Optional[InputTransform] = ...,
         missing_value: MissingValue = ...,
+        save_with: SaveWith = ...,
     ) -> None:
         ...
 
@@ -159,6 +167,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         n_pp_jobs: int = 8,
         transform: Optional[Union[InputTransform, TargetTransform]] = None,
         missing_value: MissingValue = MissingValue.ZERO,
+        save_with: SaveWith = SaveWith.TORCH,
     ) -> None:
         self.root = Path(root)
         self.train = train
@@ -169,6 +178,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         self.target_dir = (self.root / self.TARGET_DIR_NAME) if self.train else None
         self.tile_dir = tile_dir
         self._preprocess = preprocess
+        self.save_with = save_with
 
         if (not self.preprocess) or (not self.is_preprocessed):
             if self.tile_file is None:
@@ -216,8 +226,10 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         if self.tile_file is not None:
             tf_stem = self.tile_file.stem
             pp_dir_stem += f"_tile_file={tf_stem}"
-        # return self.root / "preprocessed" / self.split / pp_dir_stem
-        return self.root / "preprocessed_np" / self.split / pp_dir_stem
+        subroot_dir = "preprocessed"
+        if self.save_with is SaveWith.NP:
+            subroot_dir += "_np"
+        return self.root / subroot_dir / self.split / pp_dir_stem
 
     @property
     @lru_cache(maxsize=16)
@@ -230,9 +242,13 @@ class SentinelDataset(Dataset, Generic[TR, P]):
 
         def _load_save(index: int) -> None:
             sample = self._load_unprocessed(index)
-            fp = pp_dir / f"{index}.npz"
-            np.savez(file=fp, **{key: value for key, value in sample.items()})
-            # torch.save(self._load_unprocessed(index), f=fp)
+            fp = pp_dir / str(index)
+            if self.save_with is SaveWith.NP:
+                fp_suffixed = fp.with_suffix(".npz")
+                np.savez(file=fp_suffixed, **{key: value for key, value in sample.items()})
+            else:
+                fp_suffixed = fp.with_suffix(".pt")
+                torch.save(self._load_unprocessed(index), f=fp_suffixed)
 
         logger.info(f"Starting data-preprocessing with output directory '{pp_dir.resolve()}'.")
         try:
@@ -392,19 +408,22 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     def _load_preprocessed(
         self: "SentinelDataset", index: int
     ) -> Union[TestSample[str], TrainSample]:
-        fp = self.preprocessed_dir / f"{self.indices[index]}.npz"
-        sample = dict(np.load(file=fp))
-        if "chip" in sample:
-            sample["chip"] = str(sample["chip"])
-            sample = cast(TestSample, sample)
-        sample = cast(TrainSample, sample)
-        sample["image"] = torch.from_numpy(sample["image"])
-        # For backwards compatibility
-        if sample["image"].ndim == 3:
-            sample["image"] = sample["image"].unsqueeze(self.TEMPORAL_DIM)
-        return sample
-        # fp = self.preprocessed_dir / f"{self.indices[index]}.pt"
-        # return torch.load(f=fp)
+        if self.save_with is SaveWith.NP:
+            fp = self.preprocessed_dir / f"{self.indices[index]}.npz"
+            sample = dict(np.load(file=fp))
+            if "chip" in sample:
+                sample = cast(TestSample, sample)
+            else:
+                sample["label"] = torch.from_numpy(sample["label"])
+                sample = cast(TrainSample, sample)
+            sample["image"] = torch.from_numpy(sample["image"])
+            # For backwards compatibility
+            if sample["image"].ndim == 3:
+                sample["image"] = sample["image"].unsqueeze(self.TEMPORAL_DIM)
+            return sample
+
+        fp = self.preprocessed_dir / f"{self.indices[index]}.pt"
+        return torch.load(f=fp, map_location=torch.device("cpu"))
 
     @overload
     def __getitem__(self: "SentinelDataset[LitTrue, P]", index: int) -> TrainSample:

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Generic, List, Optional, Tuple, TypeVar, Union, cast
+from typing import Any, Generic, List, Optional, TypeVar, Union, cast
 
 import attr
 from conduit.types import Stage
@@ -40,30 +40,6 @@ class TrainValTestPredSplit(Generic[TD]):
 
 @attr.define(kw_only=True)
 class SentinelDataModule(pl.LightningDataModule):
-
-    BANDS_TO_KEEP: ClassVar[Tuple[int, ...]] = (
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-        9,
-        10,
-        11,
-        12,
-        15,
-        16,
-        17,
-        18,
-        19,
-        20,
-        21,
-    )  # via offline feature selection
-
     train_batch_size: int = 16
     _eval_batch_size: Optional[int] = None
     num_workers: int = 0
@@ -75,6 +51,7 @@ class SentinelDataModule(pl.LightningDataModule):
     group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP
     preprocess: bool = True
     n_pp_jobs: int = 4
+    save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.NP
 
     split_seed: int = 47
     val_prop: float = 0.2
@@ -197,6 +174,7 @@ class SentinelDataModule(pl.LightningDataModule):
             group_by=self.group_by,
             preprocess=self.preprocess,
             n_pp_jobs=self.n_pp_jobs,
+            save_with=self.save_with,
             train=True,
         )
         if self.test_prop is None:
@@ -212,6 +190,7 @@ class SentinelDataModule(pl.LightningDataModule):
             group_by=self.group_by,
             preprocess=self.preprocess,
             n_pp_jobs=self.n_pp_jobs,
+            save_with=self.save_with,
             train=False,
         )
         return TrainValTestPredSplit(train=train, val=val, test=test, pred=pred)
@@ -287,9 +266,6 @@ class SentinelDataModule(pl.LightningDataModule):
                 T.ClampAGBM(
                     vmin=0.0, vmax=500.0
                 ),  # exclude AGBM outliers, 500 is good upper limit per AGBM histograms
-                T.MinMaxNormalizeTarget(
-                    orig_min=0.0, orig_max=500, new_min=0.0, new_max=1.0, inplace=True
-                ),
             ]
         )
 
