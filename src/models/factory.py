@@ -30,7 +30,7 @@ class UnetFn(ModelFactory[smp.Unet]):
     encoder_weights: Optional[str] = None
     decoder_use_batchnorm: bool = True
     decoder_channels: Tuple[int, ...] = (256, 128, 64, 32, 16)
-    decoder_attention: bool = True
+    decoder_attention: bool = False
 
     @override
     def __call__(self, in_channels):
@@ -52,7 +52,7 @@ class UnetPlusPlusFn(ModelFactory[smp.UnetPlusPlus]):
     encoder_weights: Optional[str] = None
     decoder_use_batchnorm: bool = True
     decoder_channels: Tuple[int, ...] = (256, 128, 64, 32, 16)
-    decoder_attention: bool = True
+    decoder_attention: bool = False
 
     @override
     def __call__(self, in_channels):

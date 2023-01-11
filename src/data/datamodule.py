@@ -1,6 +1,17 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Generic, List, Optional, Tuple, TypeVar, Union, cast
+from typing import (
+    Any,
+    ClassVar,
+    Generic,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import attr
 from conduit.types import Stage
@@ -39,7 +50,7 @@ class TrainValTestPredSplit(Generic[TD]):
     pred: PredData
 
 
-@attr.define(kw_only=True, eq=False)
+@attr.define(kw_only=True)
 class SentinelDataModule(pl.LightningDataModule):
 
     BANDS_TO_KEEP: ClassVar[Tuple[int, ...]] = (
@@ -76,6 +87,7 @@ class SentinelDataModule(pl.LightningDataModule):
     group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP
     preprocess: bool = True
     n_pp_jobs: int = 4
+    temporal_dim: Optional[Literal[1]] = 1
 
     split_seed: int = 47
     val_prop: float = 0.2
@@ -88,7 +100,7 @@ class SentinelDataModule(pl.LightningDataModule):
     _train_transforms: Optional[TrainTransform] = None
     _eval_transforms: Optional[EvalTransform] = None
 
-    def __attrs_post_init__(self) -> None:
+    def __attrs_pre_init__(self) -> None:
         super().__init__()
 
     @property
@@ -282,47 +294,50 @@ class SentinelDataModule(pl.LightningDataModule):
         return CStatsPair(input=input_stats, target=target_stats)
 
     @property
+    def is_spatiotemporal(self) -> bool:
+        return self.group_by is SentinelDataset.GroupBy.CHIP
+
+    @property
     def _default_train_transforms(self) -> TrainTransform:
         # NOTE: torchgeo's indices are appended to dim -3, meaning we have to
         # transpose the temporal and spatial dims prior to (and after) applying
         # them.
         # transpose = T.Transpose(0, 1) if self.is_spatiotemporal else T.Identity()
         return T.Compose(
-            # # -- Input transforms --
-            # transpose,
-            # indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
-            # indices.AppendNormalizedDifferenceIndex(
-            #     index_a=11, index_b=12
-            # ),  # (VV-VH)/(VV+VH), index 16
-            # indices.AppendNDBI(
-            #     index_swir=8, index_nir=6
-            # ),  # Difference Built-up Index for development detection, index 17
-            # indices.AppendNDRE(
-            #     index_nir=6, index_vre1=3
-            # ),  # Red Edge Vegetation Index for canopy detection, index 18
-            # indices.AppendNDSI(index_green=1, index_swir=8),  # Snow Index, index 19
-            # indices.AppendNDWI(
-            #     index_green=1, index_nir=6
-            # ),  # Difference Water Index for water detection, index 20
-            # indices.AppendSWI(
-            #     index_vre1=3, index_swir2=8
-            # ),  # Standardized Water-Level Index for water detection, index 21
-            # T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 22
-            # T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
-            # transpose,
-            T.DropBands([11, 12, 13, 14], slice_dim=0),  # DROPS ALL BUT SPECIFIED bands_to_keep
-            # -- Target transforms --
-            T.ClampAGBM(
-                vmin=0.0, vmax=500.0
-            ),  # exclude AGBM outliers, 500 is good upper limit per AGBM histograms
-            T.MinMaxNormalizeTarget(
-                orig_min=0.0, orig_max=500, new_min=0.0, new_max=1.0, inplace=True
-            ),
+            [
+                # # -- Input transforms --
+                # transpose,
+                # indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
+                # indices.AppendNormalizedDifferenceIndex(
+                #     index_a=11, index_b=12
+                # ),  # (VV-VH)/(VV+VH), index 16
+                # indices.AppendNDBI(
+                #     index_swir=8, index_nir=6
+                # ),  # Difference Built-up Index for development detection, index 17
+                # indices.AppendNDRE(
+                #     index_nir=6, index_vre1=3
+                # ),  # Red Edge Vegetation Index for canopy detection, index 18
+                # indices.AppendNDSI(index_green=1, index_swir=8),  # Snow Index, index 19
+                # indices.AppendNDWI(
+                #     index_green=1, index_nir=6
+                # ),  # Difference Water Index for water detection, index 20
+                # indices.AppendSWI(
+                #     index_vre1=3, index_swir2=8
+                # ),  # Standardized Water-Level Index for water detection, index 21
+                # T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 22
+                # T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
+                # transpose,
+                # T.DropBands(self.BANDS_TO_KEEP, slice_dim=0),  # DROPS ALL BUT SPECIFIED bands_to_keep
+                T.Flatten(start_dim=0, end_dim=1),
+                # -- Target transforms --
+                T.ClampAGBM(
+                    vmin=0.0, vmax=500.0
+                ),  # exclude AGBM outliers, 500 is good upper limit per AGBM histograms
+                T.MinMaxNormalizeTarget(
+                    orig_min=0.0, orig_max=500, new_min=0.0, new_max=1.0, inplace=True
+                ),
+            ]
         )
-
-    @property
-    def is_spatiotemporal(self) -> bool:
-        return self.group_by is SentinelDataset.GroupBy.CHIP
 
     @property
     def _default_eval_transforms(self) -> EvalTransform:
@@ -332,29 +347,31 @@ class SentinelDataModule(pl.LightningDataModule):
         # transpose = T.Transpose(0, 1) if self.is_spatiotemporal else T.Identity()
         # Same input transforms as defined in _default_train_transforms
         return T.Compose(
-            # transpose,
-            # indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
-            # indices.AppendNormalizedDifferenceIndex(
-            #     index_a=11, index_b=12
-            # ),  # (VV-VH)/(VV+VH), index 16
-            # indices.AppendNDBI(
-            #     index_swir=8, index_nir=6
-            # ),  # Difference Built-up Index for development detection, index 17
-            # indices.AppendNDRE(
-            #     index_nir=6, index_vre1=3
-            # ),  # Red Edge Vegetation Index for canopy detection, index 18
-            # indices.AppendNDSI(index_green=1, index_swir=8),  # Snow Index, index 19
-            # indices.AppendNDWI(
-            #     index_green=1, index_nir=6
-            # ),  # Difference Water Index for water detection, index 20
-            # indices.AppendSWI(
-            #     index_vre1=3, index_swir2=8
-            # ),  # Standardized Water-Level Index for water detection, index 21
-            # T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 22
-            # T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
-            # transpose,
-            T.DropBands([11, 12, 13, 14], slice_dim=0),  # DROPS ALL BUT SPECIFIED bands_to_keep
-            # T.DropBands(self.BANDS_TO_KEEP, slice_dim=0),  # DROPS ALL BUT SPECIFIED bands_to_keep
+            [
+                # transpose,
+                # indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
+                # indices.AppendNormalizedDifferenceIndex(
+                #     index_a=11, index_b=12
+                # ),  # (VV-VH)/(VV+VH), index 16
+                # indices.AppendNDBI(
+                #     index_swir=8, index_nir=6
+                # ),  # Difference Built-up Index for development detection, index 17
+                # indices.AppendNDRE(
+                #     index_nir=6, index_vre1=3
+                # ),  # Red Edge Vegetation Index for canopy detection, index 18
+                # indices.AppendNDSI(index_green=1, index_swir=8),  # Snow Index, index 19
+                # indices.AppendNDWI(
+                #     index_green=1, index_nir=6
+                # ),  # Difference Water Index for water detection, index 20
+                # indices.AppendSWI(
+                #     index_vre1=3, index_swir2=8
+                # ),  # Standardized Water-Level Index for water detection, index 21
+                # T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 22
+                # T.AppendRatioAB(index_a=13, index_b=14),  # VV/VH Descending, index 23
+                # transpose,
+                # T.DropBands(self.BANDS_TO_KEEP, slice_dim=0),  # DROPS ALL BUT SPECIFIED bands_to_keep
+                T.Flatten(start_dim=0, end_dim=1),
+            ]
         )
 
     @property

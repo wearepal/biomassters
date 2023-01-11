@@ -75,15 +75,6 @@ class SentinelRelay(Relay):
         # model = nn.Sequential(model, DenormalizeModule(*dm.target_normalizers))
         model = nn.Sequential(model, DenormalizeModule(*dm.target_normalizers))
 
-        # enable parameter sharding with fairscale.
-        # Note: when fully-sharded training is not enabled this is a no-op
-        try:
-            from fairscale.nn import auto_wrap  # type: ignore
-
-            model: nn.Module = auto_wrap(model)  # type: ignore
-        except ImportError:
-            ...
-
         if self.logger.get("group", None) is None:
             default_group = "_".join(
                 dict_conf["_target_"].split(".")[-1].lower() for dict_conf in (self.model, self.alg)

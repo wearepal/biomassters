@@ -157,7 +157,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         train: TR = True,
         tile_dir: Optional[Path] = None,
         group_by: GroupBy = GroupBy.CHIP_MONTH,
-        temporal_dim: TemporalDim = 1,
+        temporal_dim: Optional[TemporalDim] = 1,
         preprocess: P = True,
         n_pp_jobs: int = 8,
         transform: Optional[Union[InputTransform, TargetTransform]] = None,
@@ -254,7 +254,9 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     @property
     @lru_cache(maxsize=16)
     def channel_dim(self) -> int:
-        return 1 - self.temporal_dim if self.group_by is GroupBy.CHIP else 0
+        if self.group_by is GroupBy.CHIP and (self.temporal_dim is not None):
+            return 1 - self.temporal_dim
+        return 0
 
     @property
     def in_channels(self) -> int:
@@ -306,6 +308,8 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 self._load_sentinel_tiles(sentinel_type=sentinel_type, chip=chip, month=month)
                 for month in range(12)
             ]
+            if self.temporal_dim is None:
+                return torch.stack(tiles_all_months, dim=1).flatten(0, 1)
             return torch.stack(tiles_all_months, dim=self.temporal_dim)
         filename = f"{chip}_{sentinel_type.name}_{str(month).zfill(2)}.tif"
         filepath = self.input_dir / filename

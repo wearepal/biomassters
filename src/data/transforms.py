@@ -1,10 +1,10 @@
-from dataclasses import dataclass, field
 from typing import (
     ClassVar,
     Generic,
     List,
     Optional,
     Protocol,
+    Sequence,
     Tuple,
     TypeVar,
     Union,
@@ -27,6 +27,7 @@ __all__ = [
     "Compose",
     "DenormalizeModule",
     "DropBands",
+    "Flatten",
     "Identity",
     "InputTransform",
     "MinMaxNormalizeTarget",
@@ -67,8 +68,8 @@ T = TypeVar("T", Union[InputTransform, TargetTransform], InputTransform, TargetT
 
 
 class Compose(Generic[T]):
-    def __init__(self, *transforms: T) -> None:
-        self.transforms = list(transforms)
+    def __init__(self, transforms: Sequence[T]) -> None:
+        self.transforms = transforms
 
     @overload
     def __call__(self: "Compose[InputTransform]", inputs: S) -> S:
@@ -90,13 +91,26 @@ class Compose(Generic[T]):
     def __getitem__(self, index: int) -> T:
         return self.transforms[index]
 
+    def __repr__(self) -> str:
+        format_string = self.__class__.__name__ + "("
+        for t in self.transforms:
+            format_string += "\n"
+            format_string += f"    {t}"
+        format_string += "\n)"
+        return format_string
 
-@dataclass(unsafe_hash=True)
+
 class DropBands(InputTransform):
     """Drop specified bands by index"""
 
-    bands_to_keep: Optional[Union[List[int], Tuple[int, ...]]]
-    slice_dim: Optional[int] = 0
+    def __init__(
+        self,
+        bands_to_keep: Optional[Union[List[int], Tuple[int, ...]]],
+        *,
+        slice_dim: Optional[int] = 0,
+    ) -> None:
+        self.bands_to_keep = bands_to_keep
+        self.slice_dim = slice_dim
 
     @override
     def __call__(self, inputs: S) -> S:
@@ -120,16 +134,15 @@ class DropBands(InputTransform):
         return inputs
 
 
-@dataclass(unsafe_hash=True)
 class AppendRatioAB(InputTransform):
     """Append the ratio of specified bands to the tensor."""
 
     EPSILON: ClassVar[float] = 1e-10
     DIM: ClassVar[int] = -3
-    index_a: int
-    "numerator band channel index"
-    index_b: int
-    "denominator band channel index"
+
+    def __init__(self, *, index_a: int, index_b: int) -> None:
+        self.index_a = index_a
+        self.index_b = index_b
 
     def _compute_ratio(self, band_a: Tensor, *, band_b: Tensor) -> Tensor:
         """Compute ratio band_a/band_b.
@@ -164,14 +177,12 @@ class AGBMLog1PScale(TargetTransform):
         return inputs
 
 
-@dataclass(unsafe_hash=True)
 class ClampAGBM(TargetTransform):
     """Clamp AGBM Target Data to [vmin, vmax]"""
 
-    vmin: float = 0.0
-    "minimum clamp value"
-    vmax: float = 500.0
-    "maximum clamp value, 500 is reasonable default per empirical analysis of AGBM data"
+    def __init__(self, *, vmin: float = 0.0, vmax: float = 500.0) -> None:
+        self.vmin = vmin
+        self.vmax = vmax
 
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
@@ -218,10 +229,9 @@ def eps(data: Tensor) -> float:
     return torch.finfo(data.dtype).eps
 
 
-@runtime_checkable
-@dataclass(unsafe_hash=True)
-class Normalize(Protocol):
-    inplace: bool = True
+class Normalize:
+    def __init__(self, inplace: bool = True) -> None:
+        self.inplace = inplace
 
     def _maybe_clone(self, data: Tensor) -> Tensor:
         if not self.inplace:
@@ -247,14 +257,12 @@ class Normalize(Protocol):
         return self._inverse_transform(data)
 
 
-@dataclass(unsafe_hash=True)
-class _ZScoreNormalizeMixin:
-    mean: Tensor
-    std: Tensor
+class _ZScoreNormalize(Normalize):
+    def __init__(self, *, mean: Tensor, std: Tensor, inplace: bool = True) -> None:
+        super().__init__(inplace=inplace)
+        self.mean = mean
+        self.std = std
 
-
-@dataclass(unsafe_hash=True)
-class _ZScoreNormalize(Normalize, _ZScoreNormalizeMixin):
     @override
     def _inverse_transform(self, data: Tensor) -> Tensor:
         data *= self.std
@@ -268,7 +276,6 @@ class _ZScoreNormalize(Normalize, _ZScoreNormalizeMixin):
         return data
 
 
-@dataclass(unsafe_hash=True)
 class ZScoreNormalizeInput(_ZScoreNormalize, InputTransform):
     @override
     def __call__(self, inputs: S) -> S:
@@ -276,7 +283,6 @@ class ZScoreNormalizeInput(_ZScoreNormalize, InputTransform):
         return inputs
 
 
-@dataclass(unsafe_hash=True)
 class ZScoreNormalizeTarget(_ZScoreNormalize, TargetTransform):
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
@@ -284,24 +290,21 @@ class ZScoreNormalizeTarget(_ZScoreNormalize, TargetTransform):
         return inputs
 
 
-@dataclass(unsafe_hash=True)
-class _MinMaxNormalizeMixin:
-    orig_max: float
-    orig_min: float
-    orig_range: float = field(init=False)
-    new_min: float = 0.0
-    new_max: float = 1.0
-    new_range: float = field(init=False)
-
-
-@dataclass(unsafe_hash=True)
-class _MinMaxNormalize(Normalize, _MinMaxNormalizeMixin):
-    orig_range: float = field(init=False)
-    new_min: float = 0.0
-    new_max: float = 1.0
-    new_range: float = field(init=False)
-
-    def __post_init__(self) -> None:
+class _MinMaxNormalize(Normalize):
+    def __init__(
+        self,
+        *,
+        orig_min: float,
+        orig_max: float,
+        new_min: float = 0.0,
+        new_max: float = 1.0,
+        inplace: bool = True,
+    ) -> None:
+        super().__init__(inplace=inplace)
+        self.orig_min = orig_min
+        self.orig_max = orig_max
+        self.new_min = new_min
+        self.new_max = new_max
         if self.new_min > self.new_max:
             raise ValueError("'new_min' cannot be greater than 'new_max'.")
         self.new_range = self.new_max - self.new_min
@@ -324,7 +327,6 @@ class _MinMaxNormalize(Normalize, _MinMaxNormalizeMixin):
         return data
 
 
-@dataclass(unsafe_hash=True)
 class MinMaxNormalizeInput(_MinMaxNormalize, InputTransform):
     @override
     def __call__(self, inputs: S) -> S:
@@ -332,7 +334,6 @@ class MinMaxNormalizeInput(_MinMaxNormalize, InputTransform):
         return inputs
 
 
-@dataclass(unsafe_hash=True)
 class MinMaxNormalizeTarget(_MinMaxNormalize, TargetTransform):
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
@@ -353,10 +354,10 @@ class DenormalizeModule(nn.Module):
         return x
 
 
-@dataclass(unsafe_hash=True)
 class Transpose(InputTransform):
-    dim0: int
-    dim1: int
+    def __init__(self, *, dim0: int, dim1: int) -> None:
+        self.dim0 = dim0
+        self.dim1 = dim1
 
     @override
     def __call__(self, inputs: S) -> S:
@@ -364,10 +365,10 @@ class Transpose(InputTransform):
         return inputs
 
 
-@dataclass(unsafe_hash=True)
 class MoveDim(InputTransform):
-    source: int
-    destination: int
+    def __init__(self, *, source: int, destination: int) -> None:
+        self.source = source
+        self.destination = destination
 
     @override
     def __call__(self, inputs: S) -> S:
@@ -375,22 +376,28 @@ class MoveDim(InputTransform):
         return inputs
 
 
-@dataclass(unsafe_hash=True, init=False)
 class Permute(InputTransform):
-    def __init__(self, *dims: int) -> None:
+    def __init__(self, dims: Sequence[int]) -> None:
         self.dims = dims
 
     @override
     def __call__(self, inputs: S) -> S:
-        inputs["image"] = inputs["image"].permute(self.dims)
+        inputs["image"] = inputs["image"].permute(*self.dims)
         return inputs
 
 
-@dataclass(unsafe_hash=True, init=False)
 class Identity(InputTransform):
-    def __init__(self, *dims: int) -> None:
-        self.dims = dims
+    @override
+    def __call__(self, inputs: S) -> S:
+        return inputs
+
+
+class Flatten(InputTransform):
+    def __init__(self, *, start_dim: int, end_dim: int) -> None:
+        self.start_dim = start_dim
+        self.end_dim = end_dim
 
     @override
     def __call__(self, inputs: S) -> S:
+        inputs["image"] = inputs["image"].flatten(start_dim=self.start_dim, end_dim=self.end_dim)
         return inputs
