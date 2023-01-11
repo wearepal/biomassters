@@ -44,7 +44,7 @@ class SentinelDataModule(pl.LightningDataModule):
     _eval_batch_size: Optional[int] = None
     num_workers: int = 0
     persist_workers: bool = False
-    pin_memory: bool = True
+    pin_memory: bool = False
 
     root: Union[Path, str] = "/srv/galene0/shared/data/biomassters/"
     tile_dir: Optional[Path] = None
@@ -245,9 +245,9 @@ class SentinelDataModule(pl.LightningDataModule):
             self._pred_data.transform = transform
 
     def train_statistics(self, compute_var: bool = True) -> CStatsPair:
-        dl = self.train_dataloader(eval=True)
         input_stats = ChannelStatistics()
         target_stats = ChannelStatistics()
+        dl = self.train_dataloader(eval=True)
         for batch in tqdm(dl, desc="Computing channel-wise statistics"):
             batch = cast(TrainSample, batch)
             input_stats.update(batch["image"])

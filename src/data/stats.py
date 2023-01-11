@@ -69,9 +69,9 @@ class ChannelStatistics:
             self._var += batch_var
 
     def update(self, batch: Tensor) -> None:
+        batch_t = batch.movedim(1, 0)
         old_n = self._n
-        new_n = self._n + len(batch)
-        batch_t = batch.transpose(0, 1)
+        new_n = self._n + batch_t[0].numel()
         batch_t_flat = batch_t.flatten(start_dim=1)
         batch_min = batch_t_flat.min(dim=1).values
         if self._min is None:
@@ -86,9 +86,9 @@ class ChannelStatistics:
         if self._mean is None:
             self._mean = batch_t_flat.mean(dim=1)
         else:
-            batch_sum = batch_t_flat.sum(dim=1)
+            batch_mean = (batch_t_flat / new_n).sum(dim=1)
             # Avoid potential overflow by dividing then multiplying the mean.
-            self._mean = ((self.mean / new_n) * old_n) + (batch_sum / new_n)
+            self._mean = ((self.mean / new_n) * old_n) + batch_mean
         self._n = new_n
 
 

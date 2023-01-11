@@ -6,7 +6,7 @@ train_batch_size: 16
 eval_batch_size: null
 num_workers: 0
 persist_workers: false
-pin_memory: true
+pin_memory: false
 root: /srv/galene0/shared/data/biomassters/
 tile_dir: /srv/galene0/shared/data/biomassters/sample_selection/tile_list_best_months/
 group_by: CHIP_MONTH
