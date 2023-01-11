@@ -1,4 +1,3 @@
-"""Quantile metrics for forecasting multiple quantiles per time step."""
 from typing import List
 
 from ranzen.torch.loss import ReductionType, reduce
@@ -7,7 +6,7 @@ from torch import Tensor
 import torch.nn as nn
 from typing_extensions import override
 
-__all__ = ["QuantileLoss"]
+__all__ = ["QuantileLoss", "stable_mse_loss"]
 
 
 class QuantileLoss(nn.Module):
@@ -36,3 +35,15 @@ class QuantileLoss(nn.Module):
             losses_i = 2 * torch.max((q - 1) * errors_i, q * errors_i).unsqueeze(-1)
             loss += reduce(losses=losses_i, reduction_type=self.reduction)
         return loss
+
+
+def stable_mse_loss(input: Tensor, *, target: Tensor, samplewise: bool = False) -> Tensor:
+    """
+    A more numerically stable version of MSE that simply reorders the
+    exponentiation and normalisation operations -- useful for avoiding overflow when
+    working with half precision.
+    """
+    diff = input - target
+    reduction_dim = 1 if samplewise else 0
+    diff = diff.flatten(start_dim=reduction_dim)
+    return ((diff / diff.size(reduction_dim)) * diff).sum(reduction_dim)

@@ -63,9 +63,6 @@ TR = TypeVar("TR", bound=Literal[True, False])
 P = TypeVar("P", bound=Literal[True, False])
 
 
-TemporalDim: TypeAlias = Literal[0, 1]
-
-
 class MissingValue(Enum):
     ZERO = 0.0
     NAN = torch.nan
@@ -79,6 +76,9 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     MissingValue: TypeAlias = MissingValue
 
     RESOLUTION: ClassVar[int] = 256
+    CHANNEL_DIM: ClassVar[int] = 0
+    TEMPORAL_DIM: ClassVar[int] = 1
+
     TRAIN_DIR_NAME: ClassVar[str] = "train_features"
     TARGET_DIR_NAME: ClassVar[str] = "train_agbm"
     TEST_DIR_NAME: ClassVar[str] = "test_features"
@@ -126,7 +126,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         train: LitTrue,
         tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
-        temporal_dim: TemporalDim = ...,
         preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
         transform: Optional[Union[InputTransform, TargetTransform]] = ...,
@@ -142,7 +141,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         train: LitFalse,
         tile_dir: Optional[Path] = ...,
         group_by: GroupBy = ...,
-        temporal_dim: TemporalDim = ...,
         preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
         transform: Optional[InputTransform] = ...,
@@ -157,7 +155,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         train: TR = True,
         tile_dir: Optional[Path] = None,
         group_by: GroupBy = GroupBy.CHIP_MONTH,
-        temporal_dim: Optional[TemporalDim] = 1,
         preprocess: P = True,
         n_pp_jobs: int = 8,
         transform: Optional[Union[InputTransform, TargetTransform]] = None,
@@ -166,7 +163,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         self.root = Path(root)
         self.train = train
         self.group_by = group_by
-        self.temporal_dim = temporal_dim
         self.missing_value = missing_value
         self.n_pp_jobs = n_pp_jobs
         self.input_dir = self.root / (self.TRAIN_DIR_NAME if self.train else self.TEST_DIR_NAME)
@@ -217,12 +213,11 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     @lru_cache(maxsize=16)
     def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]") -> Path:
         pp_dir_stem = f"group_by={self.group_by.name}"
-        if self.group_by is GroupBy.CHIP:
-            pp_dir_stem += f"_temporal_dim={self.temporal_dim}"
         if self.tile_file is not None:
             tf_stem = self.tile_file.stem
             pp_dir_stem += f"_tile_file={tf_stem}"
-        return self.root / "preprocessed" / self.split / pp_dir_stem
+        # return self.root / "preprocessed" / self.split / pp_dir_stem
+        return self.root / "preprocessed_np" / self.split / pp_dir_stem
 
     @property
     @lru_cache(maxsize=16)
@@ -234,7 +229,10 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         pp_dir.mkdir(parents=True, exist_ok=False)
 
         def _load_save(index: int) -> None:
-            torch.save(self._load_unprocessed(index), f=pp_dir / f"{index}.pt")
+            sample = self._load_unprocessed(index)
+            fp = pp_dir / f"{index}.npz"
+            np.savez(file=fp, **{key: value for key, value in sample.items()})
+            # torch.save(self._load_unprocessed(index), f=fp)
 
         logger.info(f"Starting data-preprocessing with output directory '{pp_dir.resolve()}'.")
         try:
@@ -252,15 +250,8 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         )
 
     @property
-    @lru_cache(maxsize=16)
-    def channel_dim(self) -> int:
-        if self.group_by is GroupBy.CHIP and (self.temporal_dim is not None):
-            return 1 - self.temporal_dim
-        return 0
-
-    @property
     def in_channels(self) -> int:
-        return self[0]["image"].size(self.channel_dim)
+        return self[0]["image"].size(self.CHANNEL_DIM)
 
     def input_size(self) -> torch.Size:
         return self[0]["image"].size()
@@ -308,16 +299,16 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 self._load_sentinel_tiles(sentinel_type=sentinel_type, chip=chip, month=month)
                 for month in range(12)
             ]
-            if self.temporal_dim is None:
-                return torch.stack(tiles_all_months, dim=1).flatten(0, 1)
-            return torch.stack(tiles_all_months, dim=self.temporal_dim)
+            return torch.stack(tiles_all_months, dim=self.TEMPORAL_DIM)
+
         filename = f"{chip}_{sentinel_type.name}_{str(month).zfill(2)}.tif"
         filepath = self.input_dir / filename
         if filepath.exists():
-            return self._read_tif_to_tensor(filepath)
-
-        # Substitute data with padding if the data for the given month is unavailable
-        return self._missing_data(sentinel_type=sentinel_type)
+            data = self._read_tif_to_tensor(filepath)
+        else:
+            # Substitute data with padding if the data for the given month is unavailable
+            data = self._missing_data(sentinel_type=sentinel_type)
+        return data.unsqueeze(self.TEMPORAL_DIM)
 
     @overload
     def _load_agbm_tile(self: "SentinelDataset[LitTrue, LitTrue]", chip: int) -> Tensor:
@@ -401,7 +392,19 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     def _load_preprocessed(
         self: "SentinelDataset", index: int
     ) -> Union[TestSample[str], TrainSample]:
-        return torch.load(f=self.preprocessed_dir / f"{self.indices[index]}.pt")
+        fp = self.preprocessed_dir / f"{self.indices[index]}.npz"
+        sample = dict(np.load(file=fp))
+        if "chip" in sample:
+            sample["chip"] = str(sample["chip"])
+            sample = cast(TestSample, sample)
+        sample = cast(TrainSample, sample)
+        sample["image"] = torch.from_numpy(sample["image"])
+        # For backwards compatibility
+        if sample["image"].ndim == 3:
+            sample["image"] = sample["image"].unsqueeze(self.TEMPORAL_DIM)
+        return sample
+        # fp = self.preprocessed_dir / f"{self.indices[index]}.pt"
+        # return torch.load(f=fp)
 
     @overload
     def __getitem__(self: "SentinelDataset[LitTrue, P]", index: int) -> TrainSample:

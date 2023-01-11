@@ -230,7 +230,7 @@ def eps(data: Tensor) -> float:
 
 
 class Normalize:
-    def __init__(self, inplace: bool = True) -> None:
+    def __init__(self, inplace: bool = False) -> None:
         self.inplace = inplace
 
     def _maybe_clone(self, data: Tensor) -> Tensor:
@@ -258,7 +258,7 @@ class Normalize:
 
 
 class _ZScoreNormalize(Normalize):
-    def __init__(self, *, mean: Tensor, std: Tensor, inplace: bool = True) -> None:
+    def __init__(self, *, mean: Tensor, std: Tensor, inplace: bool = False) -> None:
         super().__init__(inplace=inplace)
         self.mean = mean
         self.std = std
@@ -298,7 +298,7 @@ class _MinMaxNormalize(Normalize):
         orig_max: float,
         new_min: float = 0.0,
         new_max: float = 1.0,
-        inplace: bool = True,
+        inplace: bool = False,
     ) -> None:
         super().__init__(inplace=inplace)
         self.orig_min = orig_min

@@ -1,4 +1,4 @@
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
 import attr
 from conduit.types import Stage
@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from typing_extensions import override
 
 from src.algorithms.base import Algorithm
+from src.loss import stable_mse_loss
 from src.types import TrainSample
 from src.utils import to_item
 
@@ -25,7 +26,7 @@ class Erm(Algorithm):
     @property
     def loss_fn(self) -> _Loss:
         if self._loss_fn is None:
-            return F.mse_loss
+            return stable_mse_loss
         return self._loss_fn
 
     @override

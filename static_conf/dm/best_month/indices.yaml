@@ -1,0 +1,84 @@
+---
+defaults:
+  - best_month/tcmoran@_here_
+  - _self_
+
+train_transforms: 
+  _target_: src.data.transforms.Compose
+  transforms:
+    # NOTE: torchgeo's indices are appended to dim -3, meaning we have to
+    # transpose the temporal and spatial dims prior to (and after) applying
+    # them.
+    - _target_: src.data.transforms.Transpose
+      dim0: 0
+      dim1: 1
+    - _target_: torchgeo.transforms.indices.AppendNDVI
+      index_nir: 6
+      index_red: 2
+    - _target_: torchgeo.transforms.indices.AppendNormalizedDifferenceIndex
+      index_a: 11
+      index_b: 12
+    - _target_: torchgeo.transforms.indices.AppendNDBI
+      index_swir: 8 
+      index_nir: 6
+    - _target_: torchgeo.transforms.indices.AppendNDRE
+      index_nir: 6 
+      index_vre1: 3
+    - _target_: torchgeo.transforms.indices.AppendNDSI
+      index_green: 1
+      index_swir: 8
+    - _target_: torchgeo.transforms.indices.AppendNDWI
+      index_green: 1
+      index_nir: 6
+    - _target_: torchgeo.transforms.indices.AppendSWI
+      index_vre1: 3
+      index_swir2: 8
+    - _target_: src.data.transforms.AppendRatioAB
+      index_a: 11
+      index_b: 12
+    - _target_: src.data.transforms.AppendRatioAB
+      index_a: 13
+      index_b: 14
+    - _target_: src.data.transforms.Transpose
+      dim0: 0
+      dim1: 1
+    - _target_: src.data.transforms.ClampAGBM
+      vmin: 0.0
+      vmax: 500.0
+
+eval_transforms:
+  _target_: src.data.transforms.Compose
+  transforms:
+    - _target_: src.data.transforms.Transpose
+      dim0: 0
+      dim1: 1
+    - _target_: torchgeo.transforms.indices.AppendNDVI
+      index_nir: 6
+      index_red: 2
+    - _target_: torchgeo.transforms.indices.AppendNormalizedDifferenceIndex
+      index_a: 11
+      index_b: 12
+    - _target_: torchgeo.transforms.indices.AppendNDBI
+      index_swir: 8 
+      index_nir: 6
+    - _target_: torchgeo.transforms.indices.AppendNDRE
+      index_nir: 6 
+      index_vre1: 3
+    - _target_: torchgeo.transforms.indices.AppendNDSI
+      index_green: 1
+      index_swir: 8
+    - _target_: torchgeo.transforms.indices.AppendNDWI
+      index_green: 1
+      index_nir: 6
+    - _target_: torchgeo.transforms.indices.AppendSWI
+      index_vre1: 3
+      index_swir2: 8
+    - _target_: src.data.transforms.AppendRatioAB
+      index_a: 11
+      index_b: 12
+    - _target_: src.data.transforms.AppendRatioAB
+      index_a: 13
+      index_b: 14
+    - _target_: src.data.transforms.Transpose
+      dim0: 0
+      dim1: 1

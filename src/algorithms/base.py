@@ -18,6 +18,7 @@ from torch.types import Number
 from typing_extensions import Self, TypeAlias, override
 
 from src.data import SentinelDataModule
+from src.loss import stable_mse_loss
 from src.types import TestSample, TrainSample
 from src.utils import to_item, to_numpy
 
@@ -27,10 +28,6 @@ __all__ = [
 ]
 
 MetricDict: TypeAlias = Dict[str, Number]
-
-
-def samplewise_mse(y_pred: Tensor, *, y_true) -> Tensor:
-    return (y_pred - y_true).pow(2).flatten(start_dim=1).mean(1)
 
 
 @attr.define(kw_only=True, eq=False)
@@ -62,11 +59,12 @@ class Algorithm(pl.LightningModule):
     def eval_step(self, batch: TrainSample) -> Tensor:
         preds = self.forward(batch["image"])
         # Collect the sample-wise mean-squared errors in the outputs
-        return samplewise_mse(
+        return stable_mse_loss(
             # double precision is required here to avoid overflow when handling
             # the unnormalised targets.
-            y_pred=preds.to(torch.double),
-            y_true=batch["label"].to(torch.double),
+            input=preds.to(torch.double),
+            target=batch["label"].to(torch.double),
+            samplewise=True,
         ).cpu()
 
     @override

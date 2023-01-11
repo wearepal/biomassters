@@ -1,0 +1,20 @@
+---
+defaults:
+  - /schema/alg: erm
+  - _self_
+lr: 5e-05
+weight_decay: 0.0
+lr_sched_freq: 1
+test_on_best: false
+
+loss_fn:
+  _target_: torch.nn.HuberLoss
+  delta: 1.0
+scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
+
+optimizer_cls: 'torch.optim.AdamW'
+optimizer_kwargs: null
+
+scheduler_kwargs:
+  T_max: ${ trainer.max_steps }
+  eta_min: 5.0e-7

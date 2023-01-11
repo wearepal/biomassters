@@ -72,7 +72,10 @@ class SentinelRelay(Relay):
 
         model_fn: ModelFactory = instantiate(self.model)
         model = model_fn(in_channels=dm.in_channels)
-        # model = nn.Sequential(model, DenormalizeModule(*dm.target_normalizers))
+        # Merge the temporal dimension with the channeld dimension if the
+        # model is not spatiotemporal.
+        if not model_fn.IS_TEMPORAL:
+            model = nn.Sequential(nn.Flatten(start_dim=1, end_dim=2), model)
         model = nn.Sequential(model, DenormalizeModule(*dm.target_normalizers))
 
         if self.logger.get("group", None) is None:
@@ -88,9 +91,10 @@ class SentinelRelay(Relay):
             raw_config["path_to_predictions"] = str(pred_dir_exp.resolve())
 
         logger.log_hyperparams(raw_config)  # type: ignore
-        checkpointer: ModelCheckpoint = instantiate(self.checkpointer)
         progbar = CdtProgressBar(theme=self.progbar_theme)
-        trainer_callbacks = [checkpointer, progbar]
+        # checkpointer: ModelCheckpoint = instantiate(self.checkpointer)
+        # trainer_callbacks = [checkpointer, progbar]
+        trainer_callbacks = [progbar]
 
         # Set up and execute the training algorithm.
         trainer: pl.Trainer = instantiate(

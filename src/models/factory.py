@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Generic, Optional, Tuple, TypeVar
+from typing import Generic, Optional, Protocol, Tuple, TypeVar, ClassVar
 
 import segmentation_models_pytorch as smp  # type: ignore
 import torch.nn as nn
@@ -14,17 +14,21 @@ __all__ = [
     "Unet3dVdFn",
 ]
 
-M = TypeVar("M", bound=nn.Module)
+M = TypeVar("M", bound=nn.Module, covariant=True)
 
 
 @dataclass(unsafe_hash=True)
-class ModelFactory(Generic[M]):
+class ModelFactory(Protocol, Generic[M]):
+    IS_TEMPORAL: ClassVar[bool]
+
     def __call__(self, in_channels: int) -> M:
         ...
 
 
 @dataclass(unsafe_hash=True)
 class UnetFn(ModelFactory[smp.Unet]):
+    IS_TEMPORAL: ClassVar[bool] = False
+
     encoder_name: str = "resnet50"
     encoder_depth: int = 5
     encoder_weights: Optional[str] = None
@@ -47,6 +51,8 @@ class UnetFn(ModelFactory[smp.Unet]):
 
 @dataclass(unsafe_hash=True)
 class UnetPlusPlusFn(ModelFactory[smp.UnetPlusPlus]):
+    IS_TEMPORAL: ClassVar[bool] = False
+
     encoder_name: str = "resnet50"
     encoder_depth: int = 5
     encoder_weights: Optional[str] = None
@@ -69,6 +75,8 @@ class UnetPlusPlusFn(ModelFactory[smp.UnetPlusPlus]):
 
 @dataclass(unsafe_hash=True)
 class Unet3dVdFn(ModelFactory[Unet3dVd]):
+    IS_TEMPORAL: ClassVar[bool] = True
+
     dim: int = 64
     multipliers: Tuple[int, ...] = (1, 2, 4, 8)
     n_attn_heads: int = 8
