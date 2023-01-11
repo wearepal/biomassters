@@ -148,7 +148,7 @@ class Algorithm(pl.LightningModule):
             scheduler = instantiate(scheduler_config, optimizer=optimizer)
             scheduler_config = {
                 "scheduler": scheduler,
-                "interval": TrainingMode.step,
+                "interval": TrainingMode.step.name,
                 "frequency": self.lr_sched_freq,
             }
             return [optimizer], [scheduler_config]
