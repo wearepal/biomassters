@@ -3,6 +3,7 @@ import time
 
 from PIL import Image
 import pytorch_lightning as pl
+from src.data.dataset import Precision
 import torch
 
 from src.data import SentinelDataModule, SentinelDataset
@@ -15,13 +16,16 @@ if __name__ == "__main__":
         root=root,
         pin_memory=False,
         group_by=SentinelDataset.GroupBy.CHIP,
-        preprocess=False,
+        preprocess=True,
         # tile_dir=Path("sample_selection/tile_list_best_months"),
         train_batch_size=16,  # type: ignore
         eval_batch_size=16,  # type: ignore
-        n_pp_jobs=3,
-        num_workers=16,
-        save_with=SentinelDataset.SaveWith.TORCH,
+        n_pp_jobs=32,
+        num_workers=0,
+        save_with=SentinelDataset.SaveWith.NP,
+        missing_value=SentinelDataset.MissingValue.ZERO,
+        precision=SentinelDataset.Precision.HALF,
     )
     dm.setup()
-    stats = dm.train_statistics(compute_var=True)
+    dm.train_data[0]
+    # stats = dm.train_statistics(compute_var=True)

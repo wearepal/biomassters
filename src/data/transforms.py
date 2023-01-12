@@ -192,7 +192,6 @@ class ClampAGBM(TargetTransform):
 
 
 # True scaling is [0, 10000], most info is in [0, 4000] range
-
 S2_PSEUDO_MAX: Final[float] = 4000.0
 
 
