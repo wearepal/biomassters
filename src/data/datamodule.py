@@ -51,7 +51,8 @@ class SentinelDataModule(pl.LightningDataModule):
     group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP
     preprocess: bool = True
     n_pp_jobs: int = 4
-    save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.NP
+    save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.TORCH
+    missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.ZERO
 
     split_seed: int = 47
     val_prop: float = 0.2
@@ -79,9 +80,10 @@ class SentinelDataModule(pl.LightningDataModule):
         assert self._train_data is not None
         return self._train_data
 
-    @property
-    def in_channels(self) -> int:
-        return self.train_data.in_channels
+    def in_channels(self, temporal: bool) -> int:
+        if temporal:
+            return self.train_data.in_channels
+        return self.train_data.in_channels * self.train_data.sequence_length
 
     @property
     def val_data(self) -> EvalData:
@@ -132,6 +134,7 @@ class SentinelDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persist_workers,
+            prefetch_factor=2,
         )
 
     @override
@@ -153,6 +156,7 @@ class SentinelDataModule(pl.LightningDataModule):
             persistent_workers=self.persist_workers,
             batch_sampler=batch_sampler,
             sampler=None,
+            prefetch_factor=2,
         )
 
     @override
@@ -175,6 +179,7 @@ class SentinelDataModule(pl.LightningDataModule):
             preprocess=self.preprocess,
             n_pp_jobs=self.n_pp_jobs,
             save_with=self.save_with,
+            missing_value=self.missing_value,
             train=True,
         )
         if self.test_prop is None:
@@ -191,6 +196,7 @@ class SentinelDataModule(pl.LightningDataModule):
             preprocess=self.preprocess,
             n_pp_jobs=self.n_pp_jobs,
             save_with=self.save_with,
+            missing_value=self.missing_value,
             train=False,
         )
         return TrainValTestPredSplit(train=train, val=val, test=test, pred=pred)

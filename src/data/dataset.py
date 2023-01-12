@@ -66,6 +66,8 @@ P = TypeVar("P", bound=Literal[True, False])
 class MissingValue(Enum):
     ZERO = 0.0
     NAN = torch.nan
+    N1 = -1.0
+    P1 = 1.0
 
 
 class SaveWith(Enum):
@@ -269,6 +271,10 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     def in_channels(self) -> int:
         return self[0]["image"].size(self.CHANNEL_DIM)
 
+    @property
+    def sequence_length(self) -> int:
+        return self[0]["image"].size(self.TEMPORAL_DIM)
+
     def input_size(self) -> torch.Size:
         return self[0]["image"].size()
 
@@ -311,11 +317,16 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         month: Optional[int],
     ) -> Tensor:
         if month is None:
-            tiles_all_months = [
-                self._load_sentinel_tiles(sentinel_type=sentinel_type, chip=chip, month=month)
-                for month in range(12)
-            ]
-            return torch.stack(tiles_all_months, dim=self.TEMPORAL_DIM)
+            tiles_all_months = cast(
+                List[Tensor],
+                joblib.Parallel(n_jobs=1)(
+                    joblib.delayed(self._load_sentinel_tiles)(
+                        sentinel_type=sentinel_type, chip=chip, month=month
+                    )
+                    for month in range(12)
+                ),
+            )
+            return torch.cat(tiles_all_months, dim=self.TEMPORAL_DIM)
 
         filename = f"{chip}_{sentinel_type.name}_{str(month).zfill(2)}.tif"
         filepath = self.input_dir / filename
@@ -423,7 +434,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             return sample
 
         fp = self.preprocessed_dir / f"{self.indices[index]}.pt"
-        return torch.load(f=fp, map_location=torch.device("cpu"))
+        return torch.load(f=fp)
 
     @overload
     def __getitem__(self: "SentinelDataset[LitTrue, P]", index: int) -> TrainSample:

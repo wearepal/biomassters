@@ -1,0 +1,18 @@
+---
+defaults:
+  - all_months/base@_here_
+  - _self_
+
+preprocess: true
+save_with: TORCH
+
+train_transforms: 
+  _target_: src.data.transforms.Compose
+  transforms:
+    # - _target_: src.data.transforms.Identity
+    - _target_: src.data.transforms.ClampAGBM
+      vmin: 0.0
+      vmax: 500.0
+
+eval_transforms:
+  _target_: src.data.transforms.Identity

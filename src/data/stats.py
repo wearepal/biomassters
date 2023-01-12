@@ -56,7 +56,6 @@ class ChannelStatistics:
         return self.var.clamp_min(eps).sqrt()
 
     def update_var(self, batch: Tensor) -> None:
-        self._n_var += len(batch)
         if self._n_var > self._n:
             raise RuntimeError(
                 "More samples passed to compute variance than were used to compute the mean."
@@ -67,6 +66,7 @@ class ChannelStatistics:
             self._var = batch_var
         else:
             self._var += batch_var
+        self._n_var += batch[:, 0].numel()
 
     def update(self, batch: Tensor) -> None:
         batch_t = batch.movedim(1, 0)

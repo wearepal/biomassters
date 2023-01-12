@@ -1,0 +1,12 @@
+---
+defaults:
+  - best_month/tcmoran@_here_
+  - _self_
+
+train_transforms: 
+  _target_: src.data.transforms.Compose
+  transforms:
+    - _target_: src.data.transforms.Identity
+
+eval_transforms:
+  _target_: src.data.transforms.Identity

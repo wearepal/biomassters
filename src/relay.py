@@ -71,7 +71,7 @@ class SentinelRelay(Relay):
         dm.setup()
 
         model_fn: ModelFactory = instantiate(self.model)
-        model = model_fn(in_channels=dm.in_channels)
+        model = model_fn(in_channels=dm.in_channels(model_fn.IS_TEMPORAL))
         # Merge the temporal dimension with the channeld dimension if the
         # model is not spatiotemporal.
         if not model_fn.IS_TEMPORAL:
