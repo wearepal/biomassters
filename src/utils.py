@@ -1,4 +1,5 @@
 from typing import Optional, TypeVar, Union, overload
+import torch
 
 import numpy as np
 import numpy.typing as npt
@@ -8,6 +9,7 @@ from torch.types import Number
 __all__ = [
     "to_item",
     "to_numpy",
+    "eps",
 ]
 
 
@@ -33,3 +35,7 @@ def to_numpy(tensor: Tensor, *, dtype: Optional[DT] = None) -> Union[npt.NDArray
 
 def to_item(tensor: Tensor) -> Number:
     return tensor.detach().cpu().item()
+
+
+def eps(data: Tensor) -> float:
+    return torch.finfo(data.dtype).eps

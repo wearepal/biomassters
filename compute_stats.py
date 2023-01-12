@@ -20,7 +20,7 @@ if __name__ == "__main__":
         # tile_dir=Path("sample_selection/tile_list_best_months"),
         train_batch_size=16,  # type: ignore
         eval_batch_size=16,  # type: ignore
-        n_pp_jobs=32,
+        n_pp_jobs=64,
         num_workers=0,
         save_with=SentinelDataset.SaveWith.NP,
         missing_value=SentinelDataset.MissingValue.ZERO,
@@ -28,4 +28,4 @@ if __name__ == "__main__":
     )
     dm.setup()
     dm.train_data[0]
-    # stats = dm.train_statistics(compute_var=True)
+    stats = dm.train_statistics(compute_var=True)

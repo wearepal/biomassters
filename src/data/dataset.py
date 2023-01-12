@@ -272,6 +272,8 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                     file=fp_suffixed,
                     **{
                         key: value.to(self.save_precision.torch).numpy()
+                        if isinstance(value, Tensor)
+                        else value
                         for key, value in sample.items()
                     },
                 )
@@ -280,6 +282,8 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 if self.save_precision is SavePrecision.HALF:
                     sample = {
                         key: value.to(self.save_precision.torch).numpy()
+                        if isinstance(value, Tensor)
+                        else value
                         for key, value in sample.items()
                     }
                 torch.save(sample, f=fp_suffixed)
@@ -456,9 +460,9 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             if "chip" in sample:
                 sample = cast(TestSample, sample)
             else:
-                sample["label"] = torch.as_tensor(sample["label"], torch.float32)
+                sample["label"] = torch.as_tensor(sample["label"], dtype=torch.float32)
                 sample = cast(TrainSample, sample)
-            sample["image"] = torch.as_tensor(sample["image"], torch.float32)
+            sample["image"] = torch.as_tensor(sample["image"], dtype=torch.float32)
             # For backwards compatibility
             if sample["image"].ndim == 3:
                 sample["image"] = sample["image"].unsqueeze(self.TEMPORAL_DIM)
