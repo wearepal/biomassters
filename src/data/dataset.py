@@ -3,7 +3,6 @@ from functools import lru_cache
 from pathlib import Path
 import shutil
 from typing import (
-    Callable,
     ClassVar,
     Dict,
     Generic,
@@ -36,8 +35,6 @@ from typing_extensions import Self, TypeAlias
 from src.data.transforms import (
     InputTransform,
     TargetTransform,
-    scale_sentinel1_data_,
-    scale_sentinel2_data_,
 )
 from src.logging import tqdm_joblib
 from src.types import LitFalse, LitTrue, TestSample, TrainSample
@@ -48,12 +45,11 @@ __all__ = ["SentinelDataset"]
 
 
 class SentinelType(Enum):
-    S1 = (4, scale_sentinel1_data_)
-    S2 = (11, scale_sentinel2_data_)
+    S1 = 4
+    S2 = 11
 
-    def __init__(self, n_channels: int, scaler: Callable[[Tensor], Tensor]) -> None:
+    def __init__(self, n_channels: int) -> None:
         self.n_channels = n_channels
-        self.scale = scaler
 
 
 class GroupBy(Enum):
@@ -151,7 +147,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         transform: Optional[Union[InputTransform, TargetTransform]] = ...,
         missing_value: MissingValue = ...,
         save_with: SaveWith = ...,
-        scale: bool = ...,
         save_precision: SavePrecision = ...,
     ) -> None:
         ...
@@ -169,7 +164,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         transform: Optional[InputTransform] = ...,
         missing_value: MissingValue = ...,
         save_with: SaveWith = ...,
-        scale: bool = ...,
         save_precision: SavePrecision = ...,
     ) -> None:
         ...
@@ -184,9 +178,8 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         preprocess: P = True,
         n_pp_jobs: int = 8,
         transform: Optional[Union[InputTransform, TargetTransform]] = None,
-        missing_value: MissingValue = MissingValue.ZERO,
-        save_with: SaveWith = SaveWith.TORCH,
-        scale: bool = True,
+        missing_value: MissingValue = MissingValue.NAN,
+        save_with: SaveWith = SaveWith.NP,
         save_precision: SavePrecision = SavePrecision.HALF,
     ) -> None:
         self.root = Path(root)
@@ -199,7 +192,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         self.tile_dir = tile_dir
         self._preprocess = preprocess
         self.save_with = save_with
-        self.scale = scale
         self.save_precision = save_precision
 
         if (not self.preprocess) or (not self.is_preprocessed):
@@ -221,8 +213,14 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         self.month = (
             self.metadata["month"].to_numpy() if self.group_by is GroupBy.CHIP_MONTH else None
         )
-        if self.preprocess and (not self.is_preprocessed):
-            self._preprocess_data()
+        if self.preprocess:
+            if self.is_preprocessed:
+                logger.info(
+                    "Using existing preprocessed-data directory"
+                    f" '{self.preprocessed_dir.resolve()}'"
+                )
+            else:
+                self._preprocess_data()
 
         self.transform = transform
 
@@ -244,13 +242,11 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     @property
     @lru_cache(maxsize=16)
     def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]") -> Path:
-        pp_dir_stem = f"group_by={self.group_by.name}_missing_value={self.missing_value.name}_scale={self.scale}_precision={self.save_precision.name}"
+        pp_dir_stem = f"group_by={self.group_by.name}_missing_value={self.missing_value.name}_precision={self.save_precision.name}"
         if self.tile_file is not None:
             tf_stem = self.tile_file.stem
             pp_dir_stem += f"_tile_file={tf_stem}"
-        subroot_dir = "preprocessed"
-        if self.save_with is SaveWith.NP:
-            subroot_dir += "_np"
+        subroot_dir = f"preprocessed_{self.save_with.value}"
         return self.root / subroot_dir / self.split / pp_dir_stem
 
     @property
@@ -294,7 +290,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 joblib.Parallel(n_jobs=self.n_pp_jobs)(
                     joblib.delayed(_load_save)(index) for index in range(len(self))
                 )
-        except KeyboardInterrupt as e:
+        except (Exception, KeyboardInterrupt) as e:
             logger.info(e)
             shutil.rmtree(pp_dir)
 
@@ -368,8 +364,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         filepath = self.input_dir / filename
         if filepath.exists():
             data = self._read_tif_to_tensor(filepath)
-            if self.scale:
-                data = sentinel_type.scale(data)
         else:
             # Substitute data with padding if the data for the given month is unavailable
             data = self._missing_data(sentinel_type=sentinel_type)
@@ -458,6 +452,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             fp = self.preprocessed_dir / f"{self.indices[index]}.npz"
             sample = dict(np.load(file=fp))
             if "chip" in sample:
+                sample["chip"] = sample["chip"].item()
                 sample = cast(TestSample, sample)
             else:
                 sample["label"] = torch.as_tensor(sample["label"], dtype=torch.float32)

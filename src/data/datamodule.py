@@ -51,8 +51,8 @@ class SentinelDataModule(pl.LightningDataModule):
     group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP
     preprocess: bool = True
     n_pp_jobs: int = 4
-    save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.TORCH
-    missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.ZERO
+    save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.NP
+    missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.NAN
     save_precision: SentinelDataset.SavePrecision = SentinelDataset.SavePrecision.HALF
 
     split_seed: int = 47
@@ -272,15 +272,20 @@ class SentinelDataModule(pl.LightningDataModule):
     def _default_train_transforms(self) -> TrainTransform:
         return T.Compose(
             [
-                T.ClampAGBM(
-                    vmin=0.0, vmax=500.0
-                ),  # exclude AGBM outliers, 500 is good upper limit per AGBM histograms
+                T.Sentinel1Scaler(),
+                T.Sentinel2Scaler(),
+                T.ClampAGBM(vmin=0.0, vmax=500.0),
             ]
         )
 
     @property
     def _default_eval_transforms(self) -> EvalTransform:
-        return T.Identity()
+        return T.Compose(
+            [
+                T.Sentinel1Scaler(),
+                T.Sentinel2Scaler(),
+            ]
+        )
 
     @property
     def target_normalizers(self) -> List[T.Normalize]:

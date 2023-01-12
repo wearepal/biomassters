@@ -34,9 +34,10 @@ __all__ = [
     "InputTransform",
     "MinMaxNormalizeTarget",
     "MoveDim",
+    "NanToNum",
     "Permute",
-    "Sentinel1Scale",
-    "Sentinel2Scale",
+    "Sentinel1Scaler",
+    "Sentinel2Scaler",
     "TensorTransform",
     "Transpose",
     "ZScoreNormalizeTarget",
@@ -192,40 +193,6 @@ class ClampAGBM(TargetTransform):
         return inputs
 
 
-# True scaling is [0, 10000], most info is in [0, 4000] range
-S2_PSEUDO_MAX: Final[float] = 4000.0
-
-
-def scale_sentinel2_data_(
-    x: Tensor, *, start_index: int = 0, end_index: Optional[int] = 11
-) -> Tensor:
-    x[start_index:end_index] /= S2_PSEUDO_MAX
-    # CLP values in band 10 are scaled differently than optical bands, [0, 100]
-    x[start_index + 10] *= S2_PSEUDO_MAX / 100.0
-    x[start_index:end_index].clamp_(0, 1)
-    return x
-
-
-class Sentinel2Scale(TensorTransform):
-    """Scale Sentinel 2 optical channels"""
-
-    def __init__(
-        self, start_index: int = 0, end_index: Optional[int] = 11, inplace: bool = True
-    ) -> None:
-        self.start_index = start_index
-        self.end_index = end_index
-        self.inplace = inplace
-
-    @override
-    def __call__(self, sample: S) -> S:
-        if not self.inplace:
-            sample["image"] = sample["image"].clone()
-        sample["image"] = scale_sentinel2_data_(
-            sample["image"], start_index=self.start_index, end_index=self.end_index
-        )
-        return sample
-
-
 # S1 db values range mostly from -50 to +20 per empirical analysis
 S1_MAX: Final[float] = 20.0
 S1_MIN: Final[float] = -50.0
@@ -241,11 +208,11 @@ def scale_sentinel1_data_(
     return x
 
 
-class Sentinel1Scale(InputTransform):
+class Sentinel1Scaler(InputTransform):
     """Scale Sentinel 1 SAR channels"""
 
     def __init__(
-        self, start_index: int = 0, end_index: Optional[int] = 11, inplace: bool = True
+        self, start_index: int = 11, end_index: Optional[int] = None, inplace: bool = True
     ) -> None:
         self.start_index = start_index
         self.end_index = end_index
@@ -259,6 +226,40 @@ class Sentinel1Scale(InputTransform):
             sample["image"], start_index=self.start_index, end_index=self.end_index
         )
         return sample
+
+
+# True scaling is [0, 10000], most info is in [0, 4000] range
+S2_PSEUDO_MAX: Final[float] = 4000.0
+
+
+def scale_sentinel2_data_(
+    x: Tensor, *, start_index: int = 0, end_index: Optional[int] = 11
+) -> Tensor:
+    x[start_index:end_index] /= S2_PSEUDO_MAX
+    # CLP values in band 10 are scaled differently than optical bands, [0, 100]
+    x[start_index + 10] *= S2_PSEUDO_MAX / 100.0
+    x[start_index:end_index].clamp_(0, 1)
+    return x
+
+
+class Sentinel2Scaler(InputTransform):
+    """Scale Sentinel 2 optical channels"""
+
+    def __init__(
+        self, start_index: int = 0, end_index: Optional[int] = 11, inplace: bool = True
+    ) -> None:
+        self.start_index = start_index
+        self.end_index = end_index
+        self.inplace = inplace
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        if not self.inplace:
+            inputs["image"] = inputs["image"].clone()
+        inputs["image"] = scale_sentinel2_data_(
+            inputs["image"], start_index=self.start_index, end_index=self.end_index
+        )
+        return inputs
 
 
 class Normalize:
@@ -432,4 +433,16 @@ class Flatten(InputTransform):
     @override
     def __call__(self, inputs: S) -> S:
         inputs["image"] = inputs["image"].flatten(start_dim=self.start_dim, end_dim=self.end_dim)
+        return inputs
+
+
+class NanToNum(InputTransform):
+    def __init__(self, value: float, *, inplace: bool = True) -> None:
+        self.value = value
+        self.inplace = inplace
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        func = torch.nan_to_num_ if self.inplace else torch.nan_to_num
+        inputs["image"] = func(inputs["image"], nan=self.value)
         return inputs
