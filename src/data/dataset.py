@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 import shutil
 from typing import (
+    Callable,
     ClassVar,
     Dict,
     Generic,
@@ -35,8 +36,8 @@ from typing_extensions import Self, TypeAlias
 from src.data.transforms import (
     InputTransform,
     TargetTransform,
-    scale_sentinel1_data,
-    scale_sentinel2_data,
+    scale_sentinel1_data_,
+    scale_sentinel2_data_,
 )
 from src.logging import tqdm_joblib
 from src.types import LitFalse, LitTrue, TestSample, TrainSample
@@ -47,11 +48,12 @@ __all__ = ["SentinelDataset"]
 
 
 class SentinelType(Enum):
-    S1 = 4
-    S2 = 11
+    S1 = (4, scale_sentinel1_data_)
+    S2 = (11, scale_sentinel2_data_)
 
-    def __init__(self, n_channels: int) -> None:
+    def __init__(self, n_channels: int, scaler: Callable[[Tensor], Tensor]) -> None:
         self.n_channels = n_channels
+        self.scale = scaler
 
 
 class GroupBy(Enum):
@@ -332,6 +334,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         filepath = self.input_dir / filename
         if filepath.exists():
             data = self._read_tif_to_tensor(filepath)
+            data = sentinel_type.scale(data)
         else:
             # Substitute data with padding if the data for the given month is unavailable
             data = self._missing_data(sentinel_type=sentinel_type)
@@ -387,17 +390,14 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             month=month,
         )
 
-        s1_tile_scaled = scale_sentinel1_data(s1_tile)
         # Load in the Sentinel2 imagery.
         s2_tile = self._load_sentinel_tiles(
             sentinel_type=SentinelType.S2,
             chip=chip,
             month=month,
         )
-        s2_tile_scaled = scale_sentinel2_data(s2_tile)
-
         # S2 data first, S1 data second.
-        sentinel_tile = torch.cat((s2_tile_scaled, s1_tile_scaled), dim=0)
+        sentinel_tile = torch.cat((s2_tile, s1_tile), dim=0)
         sample: Union[TestSample[str], TrainSample]
         if self.train:
             target_tile = self._load_agbm_tile(chip)

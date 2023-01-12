@@ -1,5 +1,6 @@
 from typing import (
     ClassVar,
+    Final,
     Generic,
     List,
     Optional,
@@ -38,8 +39,8 @@ __all__ = [
     "TensorTransform",
     "Transpose",
     "ZScoreNormalizeTarget",
-    "scale_sentinel1_data",
-    "scale_sentinel2_data",
+    "scale_sentinel1_data_",
+    "scale_sentinel2_data_",
 ]
 
 
@@ -190,16 +191,20 @@ class ClampAGBM(TargetTransform):
         return inputs
 
 
-def scale_sentinel2_data(x: Tensor) -> Tensor:
-    scale_val = 4000.0  # True scaling is [0, 10000], most info is in [0, 4000] range
-    x = x / scale_val
+# True scaling is [0, 10000], most info is in [0, 4000] range
 
+S2_PSEUDO_MAX: Final[float] = 4000.0
+
+
+def scale_sentinel2_data_(x: Tensor) -> Tensor:
+    x /= S2_PSEUDO_MAX
     # CLP values in band 10 are scaled differently than optical bands, [0, 100]
-    if x.ndim == 4:
-        x[:][10] = x[:][10] * scale_val / 100.0
+    if x.ndim == 5:
+        x[:, 10] *= S2_PSEUDO_MAX / 100.0
     else:
-        x[10] = x[10] * scale_val / 100.0
-    return x.clamp(0, 1.0)
+        x[10] *= S2_PSEUDO_MAX / 100.0
+    x.clamp_(0, 1.0)
+    return x
 
 
 class Sentinel2Scale(TensorTransform):
@@ -207,14 +212,20 @@ class Sentinel2Scale(TensorTransform):
 
     @override
     def __call__(self, x: Tensor) -> Tensor:
-        return scale_sentinel2_data(x)
+        return scale_sentinel2_data_(x)
 
 
-def scale_sentinel1_data(x: Tensor) -> Tensor:
-    s1_max = 20.0  # S1 db values range mostly from -50 to +20 per empirical analysis
-    s1_min = -50.0
-    image = (x - s1_min) / (s1_max - s1_min)
-    return image.clamp(0, 1)
+# S1 db values range mostly from -50 to +20 per empirical analysis
+S1_MAX: Final[float] = 20.0
+S1_MIN: Final[float] = -50.0
+S1_RANGE = S1_MAX - S1_MIN
+
+
+def scale_sentinel1_data_(x: Tensor) -> Tensor:
+    x -= S1_MIN
+    x /= S1_RANGE
+    x.clamp_(0, 1)
+    return x
 
 
 class Sentinel1Scale(TensorTransform):
@@ -222,7 +233,7 @@ class Sentinel1Scale(TensorTransform):
 
     @override
     def __call__(self, x: Tensor) -> Tensor:
-        return scale_sentinel1_data(x)
+        return scale_sentinel1_data_(x)
 
 
 def eps(data: Tensor) -> float:
