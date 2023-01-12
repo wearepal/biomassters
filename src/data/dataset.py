@@ -212,14 +212,8 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         self.month = (
             self.metadata["month"].to_numpy() if self.group_by is GroupBy.CHIP_MONTH else None
         )
-        if self.preprocess:
-            if self.is_preprocessed:
-                logger.info(
-                    "Using existing preprocessed-data directory"
-                    f" '{self.preprocessed_dir.resolve()}'"
-                )
-            else:
-                self._preprocess_data()
+        if self.preprocess and (not self.is_preprocessed):
+            self._preprocess_data()
 
         self.transform = transform
 
