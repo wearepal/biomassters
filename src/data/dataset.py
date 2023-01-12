@@ -32,10 +32,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from typing_extensions import Self, TypeAlias
 
-from src.data.transforms import (
-    InputTransform,
-    TargetTransform,
-)
+from src.data.transforms import InputTransform, TargetTransform
 from src.logging import tqdm_joblib
 from src.types import LitFalse, LitTrue, TestSample, TrainSample
 
@@ -300,7 +297,6 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         except (Exception, KeyboardInterrupt) as e:
             logger.info(e)
             shutil.rmtree(pp_dir)
-
 
     @property
     def in_channels(self) -> int:

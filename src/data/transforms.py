@@ -19,8 +19,8 @@ from torch import Tensor
 import torch.nn as nn
 from typing_extensions import override
 
-from src.utils import eps
 from src.types import ImageSample, TrainSample
+from src.utils import eps
 
 __all__ = [
     "AGBMLog1PScale",
@@ -437,12 +437,16 @@ class Flatten(InputTransform):
 
 
 class NanToNum(InputTransform):
-    def __init__(self, value: float, *, inplace: bool = True) -> None:
-        self.value = value
+    def __init__(self, *, nan: float, posinf: float, neginf: float, inplace: bool = True) -> None:
+        self.nan = nan
+        self.posinf = posinf
+        self.neginf = neginf
         self.inplace = inplace
 
     @override
     def __call__(self, inputs: S) -> S:
         func = torch.nan_to_num_ if self.inplace else torch.nan_to_num
-        inputs["image"] = func(inputs["image"], nan=self.value)
+        inputs["image"] = func(
+            inputs["image"], nan=self.nan, posinf=self.posinf, neginf=self.neginf
+        )
         return inputs

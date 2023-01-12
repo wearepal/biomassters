@@ -274,6 +274,7 @@ class SentinelDataModule(pl.LightningDataModule):
             [
                 T.Sentinel1Scaler(),
                 T.Sentinel2Scaler(),
+                T.NanToNum(nan=0.0, posinf=0.0, neginf=0.0, inplace=True),
                 T.ClampAGBM(vmin=0.0, vmax=500.0),
             ]
         )
@@ -284,6 +285,7 @@ class SentinelDataModule(pl.LightningDataModule):
             [
                 T.Sentinel1Scaler(),
                 T.Sentinel2Scaler(),
+                T.NanToNum(nan=0.0, posinf=0.0, neginf=0.0, inplace=True),
             ]
         )
 

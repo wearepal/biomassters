@@ -2,15 +2,18 @@
 defaults:
   - /schema/dm: base
   - _self_
+
+root: /its/home/mb715/datasets/biomassters/
+group_by: CHIP
+preprocess: true
+save_precision: HALF
+
 train_batch_size: 16
 eval_batch_size: null
 num_workers: 0
 persist_workers: false
 pin_memory: false
-root: /srv/galene0/shared/data/biomassters/
 tile_dir: null
-group_by: CHIP
-preprocess: false
 n_pp_jobs: 4
 split_seed: 47
 val_prop: 0.2

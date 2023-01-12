@@ -3,16 +3,18 @@ defaults:
   - all_months/base@_here_
   - _self_
 
-preprocess: true
-save_with: TORCH
-
+missing_value: ZERO
 train_transforms: 
   _target_: src.data.transforms.Compose
   transforms:
-    # - _target_: src.data.transforms.Identity
     - _target_: src.data.transforms.ClampAGBM
       vmin: 0.0
       vmax: 500.0
+    # - _target_: src.data.transforms.MinMaxNormalizeTarget
+    #   orig_min: 0.0
+    #   orig_max: 500.0
+    #   new_min: 0.0
+    #   new_max: 1.0
 
 eval_transforms:
   _target_: src.data.transforms.Identity
