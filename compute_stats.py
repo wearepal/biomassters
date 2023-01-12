@@ -23,9 +23,9 @@ if __name__ == "__main__":
         n_pp_jobs=64,
         num_workers=0,
         save_with=SentinelDataset.SaveWith.NP,
-        missing_value=SentinelDataset.MissingValue.ZERO,
+        missing_value=SentinelDataset.MissingValue.INF,
         save_precision=SentinelDataset.SavePrecision.HALF,
     )
     dm.setup()
     dm.train_data[0]
-    stats = dm.train_statistics(compute_var=True)
+    # stats = dm.train_statistics(compute_var=True)

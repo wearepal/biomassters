@@ -52,7 +52,7 @@ class SentinelDataModule(pl.LightningDataModule):
     preprocess: bool = True
     n_pp_jobs: int = 4
     save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.NP
-    missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.NAN
+    missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.INF
     save_precision: SentinelDataset.SavePrecision = SentinelDataset.SavePrecision.HALF
 
     split_seed: int = 47

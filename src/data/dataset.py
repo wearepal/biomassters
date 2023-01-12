@@ -66,6 +66,8 @@ class MissingValue(Enum):
     NAN = torch.nan
     N1 = -1.0
     P1 = 1.0
+    INF = torch.inf
+    NEG_INF = -torch.inf
 
 
 class SavePrecision(Enum):
@@ -178,7 +180,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         preprocess: P = True,
         n_pp_jobs: int = 8,
         transform: Optional[Union[InputTransform, TargetTransform]] = None,
-        missing_value: MissingValue = MissingValue.NAN,
+        missing_value: MissingValue = MissingValue.INF,
         save_with: SaveWith = SaveWith.NP,
         save_precision: SavePrecision = SavePrecision.HALF,
     ) -> None:
@@ -272,6 +274,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                         else value
                         for key, value in sample.items()
                     },
+                    allow_pickle=False,
                 )
             else:
                 fp_suffixed = fp.with_suffix(".pt")
@@ -290,14 +293,14 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 joblib.Parallel(n_jobs=self.n_pp_jobs)(
                     joblib.delayed(_load_save)(index) for index in range(len(self))
                 )
+            self.metadata.to_csv(pp_dir / self.PP_METADATA_FN)
+            logger.info(
+                f"Preprocessing complete! Preprocessed data has been saved to '{pp_dir.resolve()}'."
+            )
         except (Exception, KeyboardInterrupt) as e:
             logger.info(e)
             shutil.rmtree(pp_dir)
 
-        self.metadata.to_csv(pp_dir / self.PP_METADATA_FN)
-        logger.info(
-            f"Preprocessing complete! Preprocessed data has been saved to '{pp_dir.resolve()}'."
-        )
 
     @property
     def in_channels(self) -> int:
