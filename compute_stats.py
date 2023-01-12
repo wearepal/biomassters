@@ -3,7 +3,7 @@ import time
 
 from PIL import Image
 import pytorch_lightning as pl
-from src.data.dataset import Precision
+from src.data.dataset import SavePrecision
 import torch
 
 from src.data import SentinelDataModule, SentinelDataset
@@ -24,7 +24,7 @@ if __name__ == "__main__":
         num_workers=0,
         save_with=SentinelDataset.SaveWith.NP,
         missing_value=SentinelDataset.MissingValue.ZERO,
-        precision=SentinelDataset.Precision.HALF,
+        save_precision=SentinelDataset.SavePrecision.HALF,
     )
     dm.setup()
     dm.train_data[0]

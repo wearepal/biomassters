@@ -72,13 +72,13 @@ class MissingValue(Enum):
     P1 = 1.0
 
 
-class Precision(Enum):
+class SavePrecision(Enum):
     HALF = (np.float16, torch.float16)
     SINGLE = (np.float32, torch.float32)
 
     def __init__(self, np_: np.dtype, torch_: torch.dtype) -> None:
-        self.np_ = np_
-        self.torch_ = torch_
+        self.np = np_
+        self.torch = torch_
 
 
 class SaveWith(Enum):
@@ -93,7 +93,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     GroupBy: TypeAlias = GroupBy
     MissingValue: TypeAlias = MissingValue
     SaveWith: TypeAlias = SaveWith
-    Precision: TypeAlias = Precision
+    SavePrecision: TypeAlias = SavePrecision
 
     RESOLUTION: ClassVar[int] = 256
     CHANNEL_DIM: ClassVar[int] = 0
@@ -152,7 +152,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         missing_value: MissingValue = ...,
         save_with: SaveWith = ...,
         scale: bool = ...,
-        precision: Precision = ...,
+        save_precision: SavePrecision = ...,
     ) -> None:
         ...
 
@@ -170,7 +170,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         missing_value: MissingValue = ...,
         save_with: SaveWith = ...,
         scale: bool = ...,
-        precision: Precision = ...,
+        save_precision: SavePrecision = ...,
     ) -> None:
         ...
 
@@ -187,7 +187,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         missing_value: MissingValue = MissingValue.ZERO,
         save_with: SaveWith = SaveWith.TORCH,
         scale: bool = True,
-        precision: Precision = Precision.SINGLE,
+        save_precision: SavePrecision = SavePrecision.HALF,
     ) -> None:
         self.root = Path(root)
         self.train = train
@@ -200,7 +200,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         self._preprocess = preprocess
         self.save_with = save_with
         self.scale = scale
-        self.precision = precision
+        self.save_precision = save_precision
 
         if (not self.preprocess) or (not self.is_preprocessed):
             if self.tile_file is None:
@@ -244,7 +244,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     @property
     @lru_cache(maxsize=16)
     def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]") -> Path:
-        pp_dir_stem = f"group_by={self.group_by.name}_missing_value={self.missing_value.name}_scale={self.scale}_precision={self.precision.name}"
+        pp_dir_stem = f"group_by={self.group_by.name}_missing_value={self.missing_value.name}_scale={self.scale}_precision={self.save_precision.name}"
         if self.tile_file is not None:
             tf_stem = self.tile_file.stem
             pp_dir_stem += f"_tile_file={tf_stem}"
@@ -271,15 +271,15 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 np.savez_compressed(
                     file=fp_suffixed,
                     **{
-                        key: value.to(self.precision.torch_).numpy()
+                        key: value.to(self.save_precision.torch).numpy()
                         for key, value in sample.items()
                     },
                 )
             else:
                 fp_suffixed = fp.with_suffix(".pt")
-                if self.precision is Precision.HALF:
+                if self.save_precision is SavePrecision.HALF:
                     sample = {
-                        key: value.to(self.precision.torch_).numpy()
+                        key: value.to(self.save_precision.torch).numpy()
                         for key, value in sample.items()
                     }
                 torch.save(sample, f=fp_suffixed)
@@ -325,7 +325,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         return self[0]["label"].size()
 
     def _read_tif_to_tensor(self, tif_path: Path) -> Tensor:
-        with rasterio.open(tif_path) as src:
+        with rasterio.open(tif_path, driver="GTiff") as src:
             tif = torch.as_tensor(
                 src.read().astype(np.float32),
             )

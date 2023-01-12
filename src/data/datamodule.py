@@ -53,7 +53,7 @@ class SentinelDataModule(pl.LightningDataModule):
     n_pp_jobs: int = 4
     save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.TORCH
     missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.ZERO
-    precision: SentinelDataset.Precision = SentinelDataset.Precision.HALF
+    save_precision: SentinelDataset.SavePrecision = SentinelDataset.SavePrecision.HALF
 
     split_seed: int = 47
     val_prop: float = 0.2
@@ -181,7 +181,7 @@ class SentinelDataModule(pl.LightningDataModule):
             n_pp_jobs=self.n_pp_jobs,
             save_with=self.save_with,
             missing_value=self.missing_value,
-            precision=self.precision,
+            save_precision=self.save_precision,
             train=True,
         )
         if self.test_prop is None:
@@ -199,6 +199,7 @@ class SentinelDataModule(pl.LightningDataModule):
             n_pp_jobs=self.n_pp_jobs,
             save_with=self.save_with,
             missing_value=self.missing_value,
+            save_precision=self.save_precision,
             train=False,
         )
         return TrainValTestPredSplit(train=train, val=val, test=test, pred=pred)
