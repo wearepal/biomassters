@@ -1,6 +1,6 @@
 # Adapted shamelessly from https://github.com/lucidrains/video-diffusion-pytorch
 import math
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, TypeVar, Union
 
 from einops import rearrange  # type: ignore
 from einops_exts import rearrange_many  # type: ignore
@@ -93,6 +93,91 @@ def up_conv(dim: int) -> nn.ConvTranspose3d:
     )
 
 
+V = TypeVar("V")
+
+
+def cast_tuple(val: V, length: Optional[int] = None) -> Tuple[V, ...]:
+    if isinstance(val, list):
+        val = tuple(val)
+
+    output = val if isinstance(val, tuple) else ((val,) * (1 if length is None else length))
+
+    if length is not None:
+        assert len(output) == length
+
+    return output
+
+
+# axial space-time convolutions, but made causal to keep in line with the design decisions of imagen-video paper
+
+
+class AxialConv3d(nn.Module):
+    """
+    main contribution from make-a-video - pseudo conv3d axial space-time convolutions
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        *,
+        out_channels: Optional[int] = None,
+        kernel_size: int = 3,
+        temporal_kernel_size: Optional[int] = None,
+        padding: Optional[Union[int, Tuple[int, int]]] = None,
+    ) -> None:
+        super().__init__()
+        out_channels = in_channels if out_channels is None else in_channels
+        temporal_kernel_size = kernel_size if temporal_kernel_size is None else temporal_kernel_size
+
+        self.spatial_conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=kernel_size // 2 if padding is None else padding,
+        )
+        if kernel_size > 1:
+            self.temporal_conv = nn.Conv1d(
+                out_channels, out_channels, kernel_size=temporal_kernel_size
+            )
+            nn.init.dirac_(self.temporal_conv.weight.data)  # initialized to be identity
+            if self.temporal_conv.bias is not None:
+                nn.init.zeros_(self.temporal_conv.bias.data)
+        else:
+            self.temporal_conv = nn.Identity()
+        self.kernel_size = kernel_size
+
+    @override
+    def forward(self, x: Tensor) -> Tensor:
+        b, c, *_, h, w = x.shape
+        x = rearrange(x, "b c f h w -> (b f) c h w")
+        x = self.spatial_conv(x)
+        x = rearrange(x, "(b f) c h w -> b c f h w", b=b)
+        x = rearrange(x, "b c f h w -> (b h w) c f")
+        x = self.temporal_conv(x)
+
+        x = rearrange(x, "(b h w) c f -> b c f h w", h=h, w=w)
+
+        return x
+
+
+# pseudo conv2d that uses conv3d but with kernel size of 1 across frames dimension
+def pseudo_conv2d(dim_in, dim_out, kernel, stride=1, padding=0, **kwargs):
+    kernel = cast_tuple(kernel, 2)
+    stride = cast_tuple(stride, 2)
+    padding = cast_tuple(padding, 2)
+
+    if len(kernel) == 2:
+        kernel = (1, *kernel)
+
+    if len(stride) == 2:
+        stride = (1, *stride)
+
+    if len(padding) == 2:
+        padding = (0, *padding)
+
+    return nn.Conv3d(dim_in, dim_out, kernel, stride=stride, padding=padding, **kwargs)
+
+
 def down_conv(dim) -> nn.Conv3d:
     return nn.Conv3d(
         in_channels=dim,
@@ -104,15 +189,18 @@ def down_conv(dim) -> nn.Conv3d:
 
 
 class LayerNorm(nn.Module):
-    def __init__(self, dim: int, *, eps=1e-5) -> None:
+    def __init__(self, dim: int, *, eps=1e-5, stable: bool = False) -> None:
         super().__init__()
         self.eps = eps
         self.gamma = nn.Parameter(torch.ones(1, dim, 1, 1, 1))
+        self.stable = stable
 
     @override
     def forward(self, x: Tensor) -> Tensor:
+        if self.stable:
+            x = x / x.amax(dim=1, keepdim=True).detach()
         var, mean = torch.var_mean(x, dim=1, unbiased=False, keepdim=True)
-        return (x - mean) / (var + self.eps).sqrt() * self.gamma
+        return (x - mean) * (var + self.eps).rsqrt() * self.gamma
 
 
 class PreNorm(nn.Module):
@@ -138,14 +226,9 @@ class Block2d(nn.Module):
         self.act = nn.SiLU()
 
     @override
-    def forward(self, x: Tensor, scale_shift: Optional[Tuple[Tensor, Tensor]] = None) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = self.proj(x)
         x = self.norm(x)
-
-        if scale_shift is not None:
-            scale, shift = scale_shift
-            x = x * (scale + 1) + shift
-
         return self.act(x)
 
 
@@ -155,41 +238,30 @@ class Block3d(nn.Module):
         self.proj = nn.Conv3d(
             in_dim, out_channels=out_dim, kernel_size=(1, 3, 3), padding=(0, 1, 1)
         )
+        # self.proj = AxialConv3d(in_dim, out_channels=out_dim, kernel_size=3, padding=(1, 1))
         self.norm = nn.GroupNorm(groups, num_channels=out_dim)
         self.act = nn.SiLU()
 
     @override
-    def forward(self, x: Tensor, scale_shift: Optional[Tuple[Tensor, Tensor]] = None) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = self.proj(x)
         x = self.norm(x)
-
-        if scale_shift is not None:
-            scale, shift = scale_shift
-            x = x * (scale + 1) + shift
-
         return self.act(x)
 
 
-class ResnetBlock2d(nn.Module):
-    def __init__(self, in_dim, *, out_dim, groups=8) -> None:
+class Always:
+    def __init__(self, val: float) -> None:
         super().__init__()
-        self.block1 = Block2d(in_dim, out_dim=out_dim, groups=groups)
-        self.block2 = Block2d(out_dim, out_dim=out_dim, groups=groups)
-        self.res_conv = (
-            nn.Conv2d(in_dim, out_channels=out_dim, kernel_size=1)
-            if in_dim != out_dim
-            else nn.Identity()
-        )
+        self.val = val
 
-    @override
-    def forward(self, x: Tensor) -> Tensor:
-        h = self.block1(x)
-        h = self.block2(h)
-        return h + self.res_conv(x)
+    def __call__(self, x: Tensor) -> float:
+        return self.val
 
 
 class ResnetBlock3d(nn.Module):
-    def __init__(self, in_dim, *, out_dim, groups=8) -> None:
+    def __init__(
+        self, in_dim: int, *, out_dim: int, groups: int = 8, use_gca: bool = False
+    ) -> None:
         super().__init__()
         self.block1 = Block3d(in_dim, out_dim=out_dim, groups=groups)
         self.block2 = Block3d(out_dim, out_dim=out_dim, groups=groups)
@@ -198,11 +270,13 @@ class ResnetBlock3d(nn.Module):
             if in_dim != out_dim
             else nn.Identity()
         )
+        self.gca = GlobalContext(dim_in=out_dim, dim_out=out_dim) if use_gca else Always(1)
 
     @override
     def forward(self, x: Tensor) -> Tensor:
         h = self.block1(x)
         h = self.block2(h)
+        h = h * self.gca(h)
         return h + self.res_conv(x)
 
 
@@ -233,6 +307,29 @@ class SpatialLinearAttention(nn.Module):
         out = rearrange(out, "b h c (x y) -> b (h c) x y", h=self.heads, x=h, y=w)
         out = self.to_out(out)
         return rearrange(out, "(b f) c h w -> b c f h w", b=b)
+
+
+class GlobalContext(nn.Module):
+    """basically a superior form of squeeze-excitation that is attention-esque"""
+
+    def __init__(self, *, dim_in, dim_out):
+        super().__init__()
+        self.to_k = pseudo_conv2d(dim_in, 1, 1)
+        hidden_dim = max(3, dim_out // 2)
+
+        self.net = nn.Sequential(
+            pseudo_conv2d(dim_in, hidden_dim, 1),
+            nn.SiLU(),
+            pseudo_conv2d(hidden_dim, dim_out, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        context = self.to_k(x)
+        x, context = rearrange_many((x, context), "b n ... -> b n (...)")
+        out = einsum("b i n, b c n -> b c i", context.softmax(dim=-1), x)
+        out = rearrange(out, "... -> ... 1 1")
+        return self.net(out)
 
 
 class EinopsToAndFrom(nn.Module):
@@ -425,7 +522,7 @@ class Unet3dVd(nn.Module):
 
         # Final (2d) conv block operating on temporally-pooled features
         self.final_conv = nn.Sequential(
-            ResnetBlock3d(in_dim=dim * 2, out_dim=dim, groups=resnet_groups),
+            ResnetBlock3d(in_dim=dim * 2, out_dim=dim, groups=resnet_groups, use_gca=True),
             nn.Conv3d(in_channels=dim, out_channels=self.out_channels, kernel_size=1),
         )
 

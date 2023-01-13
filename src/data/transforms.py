@@ -41,6 +41,8 @@ __all__ = [
     "TensorTransform",
     "Transpose",
     "ZScoreNormalizeTarget",
+    "ApplyToOpticalSlice",
+    "ApplyToTimeSlice",
     "scale_sentinel1_data_",
     "scale_sentinel2_data_",
 ]
@@ -200,7 +202,7 @@ S1_RANGE = S1_MAX - S1_MIN
 
 
 def scale_sentinel1_data_(
-    x: Tensor, start_index: int = 11, end_index: Optional[int] = None
+    x: Tensor, start_index: int = 11, end_index: Optional[int] = 15
 ) -> Tensor:
     x[start_index:end_index] -= S1_MIN
     x[start_index:end_index] /= S1_RANGE
@@ -212,7 +214,7 @@ class Sentinel1Scaler(InputTransform):
     """Scale Sentinel 1 SAR channels"""
 
     def __init__(
-        self, start_index: int = 11, end_index: Optional[int] = None, inplace: bool = True
+        self, start_index: int = 11, end_index: Optional[int] = 15, inplace: bool = True
     ) -> None:
         self.start_index = start_index
         self.end_index = end_index
@@ -240,6 +242,54 @@ def scale_sentinel2_data_(
     x[start_index + 10] *= S2_PSEUDO_MAX / 100.0
     x[start_index:end_index].clamp_(0, 1)
     return x
+
+
+class ApplyToOpticalSlice(InputTransform):
+    def __init__(
+        self,
+        transform: InputTransform,
+        *,
+        start_index: int,
+        end_index: Optional[int] = None,
+        inplace: bool = True,
+    ) -> None:
+        self.transform = transform
+        self.start_index = start_index
+        self.end_index = end_index
+        self.inplace = inplace
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        if not self.inplace:
+            inputs["image"] = inputs["image"].clone()
+        sliced_input: ImageSample = {"image": inputs["image"][self.start_index : self.end_index]}
+        inputs["image"][self.start_index : self.end_index] = self.transform(sliced_input)["image"]
+        return inputs
+
+
+class ApplyToTimeSlice(InputTransform):
+    def __init__(
+        self,
+        transform: InputTransform,
+        *,
+        start_index: int,
+        end_index: Optional[int] = None,
+        inplace: bool = True,
+    ) -> None:
+        self.transform = transform
+        self.start_index = start_index
+        self.end_index = end_index
+        self.inplace = inplace
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        if not self.inplace:
+            inputs["image"] = inputs["image"].clone()
+        sliced_input: ImageSample = {"image": inputs["image"][:, self.start_index : self.end_index]}
+        inputs["image"][:, self.start_index : self.end_index] = self.transform(sliced_input)[
+            "image"
+        ]
+        return inputs
 
 
 class Sentinel2Scaler(InputTransform):
@@ -437,7 +487,14 @@ class Flatten(InputTransform):
 
 
 class NanToNum(InputTransform):
-    def __init__(self, *, nan: float, posinf: float, neginf: float, inplace: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        nan: Optional[float] = None,
+        posinf: Optional[float] = None,
+        neginf: Optional[float] = None,
+        inplace: bool = True,
+    ) -> None:
         self.nan = nan
         self.posinf = posinf
         self.neginf = neginf

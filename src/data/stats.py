@@ -1,8 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
+
+from src.data.dataset import MissingValue
+from src.utils import eps
 
 __all__ = [
     "CStatsPair",
@@ -13,13 +16,15 @@ __all__ = [
 @dataclass(unsafe_hash=True)
 class ChannelStatistics:
 
-    _mean: Optional[Tensor] = None
-    _std: Optional[Tensor] = None
-    _var: Optional[Tensor] = None
-    _min: Optional[Tensor] = None
-    _max: Optional[Tensor] = None
-    _n: int = 0
-    _n_var: int = 0
+    missing_value: Optional[MissingValue] = None
+
+    _mean: Optional[Tensor] = field(init=False, default=None)
+    _std: Optional[Tensor] = field(init=False, default=None)
+    _var: Optional[Tensor] = field(init=False, default=None)
+    _min: Optional[Tensor] = field(init=False, default=None)
+    _max: Optional[Tensor] = field(init=False, default=None)
+    _n: Optional[Tensor] = field(init=False, default=None)
+    _n_var: Optional[Tensor] = field(init=False, default=None)
 
     @property
     def mean(self) -> Tensor:
@@ -41,9 +46,13 @@ class ChannelStatistics:
 
     @property
     def var(self) -> Tensor:
-        if self._var is None:
+        if self._var is None or (self._n_var is None):
             raise AttributeError("No updates have been computed yet.")
-        if self._n_var < self._n:
+        elif self._n is None:
+            raise RuntimeError(
+                "Mean must be computed with 'update' before variance can be computed."
+            )
+        elif (self._n_var < self._n).any():
             raise RuntimeError(
                 "The number of samples used to compute the variance is less than the number "
                 "used to compute the mean."
@@ -52,41 +61,83 @@ class ChannelStatistics:
 
     @property
     def std(self) -> Tensor:
-        eps = torch.finfo(self.var.dtype).eps
-        return self.var.clamp_min(eps).sqrt()
+        return self.var.clamp_min(eps(self.var)).sqrt()
 
     def update_var(self, batch: Tensor) -> None:
-        if self._n_var > self._n:
+        if self._n is None:
+            raise RuntimeError(
+                "Mean must be computed with 'update' before variance can be computed."
+            )
+        if (self._n_var is not None) and (self._n_var > self._n).any():
             raise RuntimeError(
                 "More samples passed to compute variance than were used to compute the mean."
             )
-        mean = self.mean.view(1, -1, *((batch.ndim - 2) * (1,)))
-        batch_var = (batch - mean).pow(2).transpose(0, 1).flatten(start_dim=1).sum(dim=1) / self._n
+        batch_t = batch.transpose(0, 1)
+        batch_t_flat = batch_t.flatten(start_dim=1)
+        mean = self.mean.unsqueeze(-1)
+        mask: Optional[Tensor] = None
+        if self.missing_value:
+            mask = self.missing_value.checker(batch_t_flat)
+            counts = (~mask).count_nonzero(dim=1)
+        else:
+            counts = torch.tensor(
+                (batch_t_flat.size(1),) * batch_t_flat.size(0), device=batch.device
+            )
+
+        new_n = self._n + counts
+
+        sq_err = (batch_t_flat - mean).pow(2)
+        if mask is not None:
+            sq_err[mask] = 0.0
+        batch_var = sq_err.sum(dim=1) / self._n
         if self._var is None:
             self._var = batch_var
         else:
             self._var += batch_var
-        self._n_var += batch[:, 0].numel()
+
+        if self._n_var is None:
+            self._nv_ar = counts
+        else:
+            self._n_var += counts
 
     def update(self, batch: Tensor) -> None:
         batch_t = batch.movedim(1, 0)
-        old_n = self._n
-        new_n = self._n + batch_t[0].numel()
+        old_n = 0.0 if self._n is None else self._n
         batch_t_flat = batch_t.flatten(start_dim=1)
+        mask: Optional[Tensor] = None
+        if self.missing_value:
+            mask = self.missing_value.checker(batch_t_flat)
+            counts = (~mask).count_nonzero(dim=1)
+        else:
+            counts = torch.tensor(
+                (batch_t_flat.size(1),) * batch_t_flat.size(0), device=batch.device
+            )
+
+        new_n = old_n + counts
+        if mask is not None:
+            batch_t_flat[mask] = torch.inf
         batch_min = batch_t_flat.min(dim=1).values
+
         if self._min is None:
-            self._min = batch_min
+            self._min = batch_t_flat.min(dim=1).values
         else:
             self._min = self._min.min(batch_min)
+
+        if mask is not None:
+            batch_t_flat[mask] = -torch.inf
         batch_max = batch_t_flat.max(dim=1).values
+
         if self._max is None:
             self._max = batch_max
         else:
             self._max = self._max.max(batch_max)
+
+        if mask is not None:
+            batch_t_flat[mask] = 0.0
+        batch_mean = (batch_t_flat / new_n.unsqueeze(1)).sum(dim=1)
         if self._mean is None:
-            self._mean = batch_t_flat.mean(dim=1)
+            self._mean = batch_mean
         else:
-            batch_mean = (batch_t_flat / new_n).sum(dim=1)
             # Avoid potential overflow by dividing then multiplying the mean.
             self._mean = ((self.mean / new_n) * old_n) + batch_mean
         self._n = new_n

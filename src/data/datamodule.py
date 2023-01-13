@@ -254,8 +254,8 @@ class SentinelDataModule(pl.LightningDataModule):
             self._pred_data.transform = transform
 
     def train_statistics(self, compute_var: bool = True) -> CStatsPair:
-        input_stats = ChannelStatistics()
-        target_stats = ChannelStatistics()
+        input_stats = ChannelStatistics(missing_value=self.missing_value)
+        target_stats = ChannelStatistics(missing_value=self.missing_value)
         dl = self.train_dataloader(eval=True)
         for batch in tqdm(dl, desc="Computing channel-wise statistics"):
             batch = cast(TrainSample, batch)

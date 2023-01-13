@@ -7,9 +7,9 @@ weight_decay: 0.0
 lr_sched_freq: 1
 test_on_best: false
 
-loss_fn:
-  _target_: torch.nn.HuberLoss
-  delta: 1.0
+loss_fn: null
+  # _target_: torch.nn.HuberLoss
+  # delta: 1.0
 
 optimizer_cls: 'torch.optim.AdamW'
 optimizer_kwargs: null

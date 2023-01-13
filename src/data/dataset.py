@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 import shutil
 from typing import (
+    Callable,
     ClassVar,
     Dict,
     Generic,
@@ -58,13 +59,19 @@ TR = TypeVar("TR", bound=Literal[True, False])
 P = TypeVar("P", bound=Literal[True, False])
 
 
+def iszero(x: Tensor) -> Tensor:
+    return x == 0.0
+
+
 class MissingValue(Enum):
-    ZERO = 0.0
-    NAN = torch.nan
-    N1 = -1.0
-    P1 = 1.0
-    INF = torch.inf
-    NEG_INF = -torch.inf
+    ZERO = (0.0, iszero)
+    NAN = (torch.nan, torch.isnan)
+    INF = (torch.inf, torch.isposinf)
+    NEG_INF = (-torch.inf, torch.isneginf)
+
+    def __init__(self, float: float, checker: Callable[[Tensor], Tensor]) -> None:
+        self.float = float
+        self.checker = checker
 
 
 class SavePrecision(Enum):
@@ -132,6 +139,10 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         14: "S1-VH-Desc: Cband-10m",
     }
     INVERSE_CHANNEL_MAP = dict(zip(CHANNEL_MAP.values(), CHANNEL_MAP.keys()))
+    # Sentinel1 data spans channels 0-10
+    S1_SLICE: slice = slice(0, 11)
+    # Sentinel2 data spans channels 11-14
+    S2_SLICE: slice = slice(11, 15)
 
     @overload
     def __init__(
@@ -330,7 +341,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         # the CloudProb band to 1s, for instance).
         return torch.full(
             (sentinel_type.n_channels, self.RESOLUTION, self.RESOLUTION),
-            fill_value=self.missing_value.value,
+            fill_value=self.missing_value.float,
         )
 
     def _load_sentinel_tiles(
