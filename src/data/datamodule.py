@@ -275,7 +275,8 @@ class SentinelDataModule(pl.LightningDataModule):
                 T.Sentinel1Scaler(),
                 T.Sentinel2Scaler(),
                 T.NanToNum(nan=0.0, posinf=0.0, neginf=0.0, inplace=True),
-                T.ClampAGBM(vmin=0.0, vmax=500.0),
+                T.ClampInput(min=0.0, max=1.0),
+                T.ClampTarget(min=0.0, max=500.0),
             ]
         )
 
@@ -286,6 +287,7 @@ class SentinelDataModule(pl.LightningDataModule):
                 T.Sentinel1Scaler(),
                 T.Sentinel2Scaler(),
                 T.NanToNum(nan=0.0, posinf=0.0, neginf=0.0, inplace=True),
+                T.ClampInput(min=0.0, max=1.0),
             ]
         )
 
@@ -293,7 +295,7 @@ class SentinelDataModule(pl.LightningDataModule):
     def target_normalizers(self) -> List[T.Normalize]:
         def _collect(tform: TrainTransform, *, collected: List[T.Normalize]) -> List[T.Normalize]:
             # criteria for a target normalizer
-            if isinstance(tform, T.Normalize) and isinstance(tform, T.TargetTransform):
+            if isinstance(tform, (T.ZScoreNormalizeTarget, T.MinMaxNormalizeTarget)):
                 collected.append(tform)
             # recursively traverse Composed transforms
             elif isinstance(tform, T.Compose):

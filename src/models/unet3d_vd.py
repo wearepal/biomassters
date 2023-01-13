@@ -420,6 +420,7 @@ class Unet3dVd(nn.Module):
         resnet_groups: int = 8,
         max_distance: int = 32,
         spatial_decoder: bool = True,
+        use_gca: bool = False,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -469,8 +470,12 @@ class Unet3dVd(nn.Module):
             self.encoder_blocks.append(
                 nn.ModuleList(
                     [
-                        ResnetBlock3d(in_dim=dim_in, out_dim=dim_out, groups=resnet_groups),
-                        ResnetBlock3d(in_dim=dim_out, out_dim=dim_out, groups=resnet_groups),
+                        ResnetBlock3d(
+                            in_dim=dim_in, out_dim=dim_out, groups=resnet_groups, use_gca=use_gca
+                        ),
+                        ResnetBlock3d(
+                            in_dim=dim_out, out_dim=dim_out, groups=resnet_groups, use_gca=use_gca
+                        ),
                         Residual(
                             PreNorm(dim_out, fn=SpatialLinearAttention(dim_out, heads=n_attn_heads))
                         )
@@ -497,7 +502,9 @@ class Unet3dVd(nn.Module):
             self.mid_spatial_attn = nn.Identity()
         self.mid_temporal_attn = Residual(PreNorm(mid_dim, fn=temporal_attn(mid_dim)))
 
-        self.mid_block2 = ResnetBlock3d(in_dim=mid_dim, out_dim=mid_dim, groups=resnet_groups)
+        self.mid_block2 = ResnetBlock3d(
+            in_dim=mid_dim, out_dim=mid_dim, groups=resnet_groups, use_gca=use_gca
+        )
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind >= (num_resolutions - 1)
@@ -505,8 +512,15 @@ class Unet3dVd(nn.Module):
             self.decoder_blocks.append(
                 nn.ModuleList(
                     [
-                        ResnetBlock3d(in_dim=dim_out * 2, out_dim=dim_in, groups=resnet_groups),
-                        ResnetBlock3d(in_dim=dim_in, out_dim=dim_in, groups=resnet_groups),
+                        ResnetBlock3d(
+                            in_dim=dim_out * 2,
+                            out_dim=dim_in,
+                            groups=resnet_groups,
+                            use_gca=use_gca,
+                        ),
+                        ResnetBlock3d(
+                            in_dim=dim_in, out_dim=dim_in, groups=resnet_groups, use_gca=use_gca
+                        ),
                         Residual(
                             PreNorm(dim_in, fn=SpatialLinearAttention(dim_in, heads=n_attn_heads))
                         )

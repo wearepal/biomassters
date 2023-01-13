@@ -1,0 +1,99 @@
+---
+defaults:
+  - all_months/base@_here_
+  - _self_
+
+missing_value: INF
+train_transforms: 
+  _target_: src.data.transforms.Compose
+  transforms:
+    - _target_: src.data.transforms.MinMaxNormalizeInput
+      orig_min: 
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - -25.0000
+        - -62.4062
+        - -10000.0000
+        - -10000.0000
+      orig_max: 
+      - 21008.0000
+      - 19392.0000
+      - 18192.0000
+      - 17744.0000
+      - 17248.0000
+      - 17024.0000
+      - 16816.0000
+      - 16704.0000
+      - 15504.0000
+      - 15312.0000
+      - 255.0000
+      - 29.4688
+      - 28.9219
+      - 31.1875
+      - 22.2031
+      new_min: 0.0
+      new_max: 1.0
+
+    - _target_: src.data.transforms.NanToNum
+      nan: 0.0
+      posinf: 0.0
+      neginf: 0.0
+
+    - _target_: src.data.transforms.MinMaxNormalizeTarget
+      orig_min: 0.0
+      orig_max: 12904.0
+      new_min: 0.0
+      new_max: 1.0
+
+eval_transforms:
+  _target_: src.data.transforms.Compose
+  transforms:
+    - _target_: src.data.transforms.MinMaxNormalizeInput
+      orig_min: 
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - 0.0000
+        - -25.0000
+        - -62.4062
+        - -10000.0000
+        - -10000.0000
+      orig_max: 
+      - 21008.0000
+      - 19392.0000
+      - 18192.0000
+      - 17744.0000
+      - 17248.0000
+      - 17024.0000
+      - 16816.0000
+      - 16704.0000
+      - 15504.0000
+      - 15312.0000
+      - 255.0000
+      - 29.4688
+      - 28.9219
+      - 31.1875
+      - 22.2031
+      new_min: 0.0
+      new_max: 1.0
+
+    - _target_: src.data.transforms.NanToNum
+      nan: 0.0
+      posinf: 0.0
+      neginf: 0.0

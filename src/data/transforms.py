@@ -9,23 +9,28 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
     final,
     overload,
     runtime_checkable,
 )
 
+from ranzen import gcopy
 import torch
 from torch import Tensor
 import torch.nn as nn
 from typing_extensions import override
 
-from src.types import ImageSample, TrainSample
+from src.types import ImageSample, LitTrue, TrainSample
 from src.utils import eps
 
 __all__ = [
     "AGBMLog1PScale",
     "AppendRatioAB",
-    "ClampAGBM",
+    "ApplyToOpticalSlice",
+    "ApplyToTimeSlice",
+    "ClampInput",
+    "ClampTarget",
     "Compose",
     "DenormalizeModule",
     "DropBands",
@@ -41,8 +46,6 @@ __all__ = [
     "TensorTransform",
     "Transpose",
     "ZScoreNormalizeTarget",
-    "ApplyToOpticalSlice",
-    "ApplyToTimeSlice",
     "scale_sentinel1_data_",
     "scale_sentinel2_data_",
 ]
@@ -182,16 +185,16 @@ class AGBMLog1PScale(TargetTransform):
         return inputs
 
 
-class ClampAGBM(TargetTransform):
+class ClampTarget(TargetTransform):
     """Clamp AGBM Target Data to [vmin, vmax]"""
 
-    def __init__(self, *, vmin: float = 0.0, vmax: float = 500.0) -> None:
-        self.vmin = vmin
-        self.vmax = vmax
+    def __init__(self, *, min: float = 0.0, max: float = 500.0) -> None:
+        self.min = min
+        self.max = max
 
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
-        inputs["label"] = torch.clamp(inputs["label"], min=self.vmin, max=self.vmax)
+        inputs["label"] = torch.clamp(inputs["label"], min=self.min, max=self.max)
         return inputs
 
 
@@ -206,7 +209,6 @@ def scale_sentinel1_data_(
 ) -> Tensor:
     x[start_index:end_index] -= S1_MIN
     x[start_index:end_index] /= S1_RANGE
-    x[start_index:end_index].clamp_(0, 1)
     return x
 
 
@@ -240,7 +242,6 @@ def scale_sentinel2_data_(
     x[start_index:end_index] /= S2_PSEUDO_MAX
     # CLP values in band 10 are scaled differently than optical bands, [0, 100]
     x[start_index + 10] *= S2_PSEUDO_MAX / 100.0
-    x[start_index:end_index].clamp_(0, 1)
     return x
 
 
@@ -312,9 +313,11 @@ class Sentinel2Scaler(InputTransform):
         return inputs
 
 
-class Normalize:
-    def __init__(self, inplace: bool = False) -> None:
+class Normalize(nn.Module):
+    def __init__(self, inplace: bool = False, batched: bool = False) -> None:
+        super().__init__()
         self.inplace = inplace
+        self.batched = batched
 
     def _maybe_clone(self, data: Tensor) -> Tensor:
         if not self.inplace:
@@ -339,74 +342,106 @@ class Normalize:
         data = self._maybe_clone(data)
         return self._inverse_transform(data)
 
+    def broadcast_shape(self, data: Tensor) -> Tuple[int, ...]:
+        if self.batched:
+            return (1, -1, *((1,) * (data.ndim - 2)))
+        return (-1, *((1,) * (data.ndim - 1)))
+
 
 class _ZScoreNormalize(Normalize):
-    def __init__(self, *, mean: Tensor, std: Tensor, inplace: bool = False) -> None:
-        super().__init__(inplace=inplace)
-        self.mean = mean
-        self.std = std
+    # Buffers
+    mean: Tensor
+    std: Tensor
+
+    def __init__(
+        self,
+        *,
+        mean: Union[float, List[float]],
+        std: Union[float, List[float]],
+        inplace: bool = False,
+        batched: bool = False,
+    ) -> None:
+        super().__init__(inplace=inplace, batched=batched)
+
+        self.register_buffer("mean", torch.as_tensor(mean))
+        self.register_buffer("std", torch.as_tensor(std))
 
     @override
     def _inverse_transform(self, data: Tensor) -> Tensor:
-        data *= self.std
-        data += self.mean
+        broadcast_shape = self.broadcast_shape(data)
+        data *= self.std.view(broadcast_shape)
+        data += self.mean.view(broadcast_shape)
         return data
 
     @override
     def _transform(self, data: Tensor) -> Tensor:
-        data -= self.mean
-        data /= self.std.clamp_min(data)
+        broadcast_shape = self.broadcast_shape(data)
+        data -= self.mean.view(broadcast_shape)
+        data /= self.std.clamp_min(eps(data)).view(broadcast_shape)
         return data
 
 
 class ZScoreNormalizeInput(_ZScoreNormalize, InputTransform):
     @override
-    def __call__(self, inputs: S) -> S:
+    def forward(self, inputs: S) -> S:
         inputs["image"] = self.transform(inputs["image"])
         return inputs
 
 
 class ZScoreNormalizeTarget(_ZScoreNormalize, TargetTransform):
     @override
-    def __call__(self, inputs: TrainSample) -> TrainSample:
+    def forward(self, inputs: TrainSample) -> TrainSample:
         inputs["label"] = self.transform(inputs["label"])
         return inputs
 
 
 class _MinMaxNormalize(Normalize):
+    # Buffers
+    orig_min: Tensor
+    orig_max: Tensor
+    new_min: Tensor
+    new_max: Tensor
+
     def __init__(
         self,
         *,
-        orig_min: float,
-        orig_max: float,
-        new_min: float = 0.0,
-        new_max: float = 1.0,
+        orig_min: Union[float, List[float]],
+        orig_max: Union[float, List[float]],
+        new_min: Union[float, List[float]] = 0.0,
+        new_max: Union[float, List[float]] = 1.0,
         inplace: bool = False,
+        batched: bool = False,
     ) -> None:
-        super().__init__(inplace=inplace)
-        self.orig_min = orig_min
-        self.orig_max = orig_max
-        self.new_min = new_min
-        self.new_max = new_max
-        if self.new_min > self.new_max:
+        super().__init__(inplace=inplace, batched=batched)
+
+        self.register_buffer("orig_min", torch.as_tensor(orig_min))
+        self.register_buffer("orig_max", torch.as_tensor(orig_max))
+        self.register_buffer("new_min", torch.as_tensor(new_min))
+        self.register_buffer("new_max", torch.as_tensor(new_max))
+
+        if (self.orig_min > self.orig_max).any():
+            raise ValueError("'orig_min' cannot be greater than 'orig_max'.")
+        if (self.new_min > self.new_max).any():
             raise ValueError("'new_min' cannot be greater than 'new_max'.")
         self.new_range = self.new_max - self.new_min
         self.orig_range = self.orig_max - self.orig_min
 
     @override
     def _inverse_transform(self, data: Tensor) -> Tensor:
-        data -= self.new_min
-        data /= self.new_range + eps(data)
-        data *= self.orig_range
-        data += self.orig_min
+        broadcast_shape = self.broadcast_shape(data)
+        data -= self.new_min.view(broadcast_shape)
+        data /= (self.new_range + eps(data)).view(broadcast_shape)
+        data *= self.orig_range.view(broadcast_shape)
+        data += self.orig_min.view(broadcast_shape)
         return data
 
     @override
     def _transform(self, data: Tensor) -> Tensor:
-        data -= self.orig_min
-        data /= self.orig_range
-        data *= self.new_range
-        data += self.new_min
+        broadcast_shape = self.broadcast_shape(data)
+        data -= self.orig_min.view(broadcast_shape)
+        data /= self.orig_range.view(broadcast_shape)
+        data *= self.new_range.view(broadcast_shape)
+        data += self.new_min.view(broadcast_shape)
         return data
 
 
@@ -427,12 +462,15 @@ class MinMaxNormalizeTarget(_MinMaxNormalize, TargetTransform):
 class DenormalizeModule(nn.Module):
     def __init__(self, *normalizers: Normalize) -> None:
         super().__init__()
-        self.normalizers = reversed(list(normalizers))
+        self.normalizers = nn.ModuleList(
+            [gcopy(normalizer, batched=True) for normalizer in normalizers]
+        )
 
     @override
     def forward(self, x: Tensor) -> Tensor:
         if not self.training:
             for normalizer in self.normalizers:
+                normalizer = cast(Normalize, normalizer)
                 x = normalizer.inverse_transform(x)
         return x
 
@@ -506,4 +544,19 @@ class NanToNum(InputTransform):
         inputs["image"] = func(
             inputs["image"], nan=self.nan, posinf=self.posinf, neginf=self.neginf
         )
+        return inputs
+
+
+class ClampInput(InputTransform):
+    def __init__(
+        self, min: Optional[float] = None, max: Optional[float] = None, inplace: bool = True
+    ) -> None:
+        self.min = min
+        self.max = max
+        self.inplace = inplace
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        func = torch.clamp_ if self.inplace else torch.clamp
+        inputs["image"] = func(inputs["image"], max=self.max, min=self.min)
         return inputs

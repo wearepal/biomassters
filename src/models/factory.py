@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Generic, Optional, Protocol, Tuple, TypeVar, ClassVar
+from typing import ClassVar, Generic, Optional, Protocol, Tuple, TypeVar
 
 import segmentation_models_pytorch as smp  # type: ignore
 import torch.nn as nn
@@ -87,6 +87,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     apply_mid_spatial_attn: bool = True
     resnet_groups: int = 8
     spatial_decoder: bool = True
+    use_gca: bool = False
 
     @override
     def __call__(self, in_channels):
@@ -103,4 +104,5 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
             apply_mid_spatial_attn=self.apply_mid_spatial_attn,
             spatial_decoder=self.spatial_decoder,
             resnet_groups=self.resnet_groups,
+            use_gca=self.use_gca,
         )

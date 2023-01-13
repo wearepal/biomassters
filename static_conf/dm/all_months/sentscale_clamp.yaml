@@ -13,9 +13,12 @@ train_transforms:
       nan: 0.0
       posinf: 0.0
       neginf: 0.0
-    - _target_: src.data.transforms.ClampAGBM
-      vmin: 0.0
-      vmax: 500.0
+    - _target_: src.data.transforms.ClampInput
+      min: 0.0
+      max: 1.0
+    - _target_: src.data.transforms.ClampTarget
+      min: 0.0
+      max: 500.0
     # - _target_: src.data.transforms.MinMaxNormalizeTarget
     #   orig_min: 0.0
     #   orig_max: 500.0
@@ -31,3 +34,6 @@ eval_transforms:
       nan: 0.0
       posinf: 0.0
       neginf: 0.0
+    - _target_: src.data.transforms.ClampInput
+      min: 0.0
+      max: 1.0
