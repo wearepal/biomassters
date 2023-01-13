@@ -45,6 +45,10 @@ class ChannelStatistics:
         return self._max
 
     @property
+    def range(self) -> Tensor:
+        return self.max - self.min
+
+    @property
     def var(self) -> Tensor:
         if self._var is None or (self._n_var is None):
             raise AttributeError("No updates have been computed yet.")
