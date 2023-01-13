@@ -96,7 +96,7 @@ class ChannelStatistics:
             self._var += batch_var
 
         if self._n_var is None:
-            self._nv_ar = counts
+            self._n_var = counts
         else:
             self._n_var += counts
 

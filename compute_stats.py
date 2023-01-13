@@ -27,9 +27,9 @@ if __name__ == "__main__":
         save_with=SentinelDataset.SaveWith.NP,
         missing_value=SentinelDataset.MissingValue.INF,
         save_precision=SentinelDataset.SavePrecision.HALF,
+        train_transforms=T.Identity(),
+        eval_transforms=T.Identity(),
     )
     dm.setup()
-    transform = T.NanToNum()
-    dm.train_data[0]
     stats = dm.train_statistics(compute_var=True)
     breakpoint()
