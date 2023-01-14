@@ -67,6 +67,7 @@ class Algorithm(pl.LightningModule):
         scheduler_kwargs: Optional[DictConfig] = None,
         lr_sched_freq: int = 1,
         test_on_best: bool = False,
+        predict_with_best: bool = True,
     ) -> None:
         super().__init__()
         self.lr = lr
@@ -77,6 +78,7 @@ class Algorithm(pl.LightningModule):
         self.scheduler_kwargs = scheduler_kwargs
         self.lr_sched_freq = lr_sched_freq
         self.test_on_best = test_on_best
+        self.predict_with_best = predict_with_best
         self.pred_dir: Optional[Path] = None
 
     def training_step(
@@ -202,7 +204,9 @@ class Algorithm(pl.LightningModule):
         if self.pred_dir is not None:
             self.pred_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Generating predictions and saving them to {self.pred_dir.resolve()}.")
-            trainer.predict(model=self, datamodule=dm)
+            trainer.predict(
+                model=self, datamodule=dm, ckpt_path="best" if self.predict_with_best else None
+            )
 
         return self
 

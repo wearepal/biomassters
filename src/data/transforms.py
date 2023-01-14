@@ -1,3 +1,4 @@
+import random
 from typing import (
     ClassVar,
     Final,
@@ -21,7 +22,7 @@ from torch import Tensor
 import torch.nn as nn
 from typing_extensions import override
 
-from src.types import ImageSample, LitTrue, TrainSample
+from src.types import ImageSample, TrainSample
 from src.utils import eps
 
 __all__ = [
@@ -41,6 +42,9 @@ __all__ = [
     "MoveDim",
     "NanToNum",
     "Permute",
+    "RandomHorizontalFlip",
+    "RandomRotation",
+    "RandomVerticalFlip",
     "Sentinel1Scaler",
     "Sentinel2Scaler",
     "TensorTransform",
@@ -559,4 +563,42 @@ class ClampInput(InputTransform):
     def __call__(self, inputs: S) -> S:
         func = torch.clamp_ if self.inplace else torch.clamp
         inputs["image"] = func(inputs["image"], max=self.max, min=self.min)
+        return inputs
+
+
+class RandomHorizontalFlip(TargetTransform):
+    DIMS = (-1,)
+    def __init__(self, p: float = 0.5) -> None:
+        self.p = p
+
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        if random.random() < self.p:
+            inputs["image"] = torch.flip(inputs["image"], dims=self.DIMS)
+            inputs["label"] = torch.flip(inputs["label"], dims=self.DIMS)
+        return inputs
+
+
+class RandomVerticalFlip(TargetTransform):
+    DIMS = (-2,)
+    def __init__(self, p: float = 0.5) -> None:
+        self.p = p
+
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        if random.random() < self.p:
+            inputs["image"] = torch.flip(inputs["image"], dims=self.DIMS)
+            inputs["label"] = torch.flip(inputs["label"], dims=self.DIMS)
+        return inputs
+
+class RandomRotation(TargetTransform):
+    def __init__(self, p: float = 0.5) -> None:
+        self.p = p
+
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        if random.random() < self.p:
+            k = random.randint(1, 3)
+            inputs["image"] = torch.rot90(inputs["image"], k=k)
+            inputs["label"] = torch.rot90(inputs["label"], k=k)
         return inputs

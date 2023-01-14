@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -96,11 +97,19 @@ class SentinelRelay(Relay):
         #         loguru.logger.info(f"Predictions will be saved to '{pred_dir_full.resolve()}'.")
         #         raw_config["path_to_predictions"] = str(pred_dir_full.resolve())
 
+        if logger._offline:
+            subdir_name = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        else:
+            subdir_name = logger.experiment.name
+        # Augment the checkpointer's dirpath with a timestamp/wandb name for uniqueness
+        checkpointer_dirpath = Path(self.checkpointer["dirpath"]) / subdir_name
+        self.checkpointer["dirpath"] = checkpointer_dirpath
+        raw_config["checkpointer"]["dirpath"] = str(checkpointer_dirpath.resolve())
+
         logger.log_hyperparams(raw_config)  # type: ignore
         progbar = CdtProgressBar(theme=self.progbar_theme)
-        # checkpointer: ModelCheckpoint = instantiate(self.checkpointer)
-        # trainer_callbacks = [checkpointer, progbar]
-        trainer_callbacks = [progbar]
+        checkpointer: ModelCheckpoint = instantiate(self.checkpointer)
+        trainer_callbacks = [checkpointer, progbar]
 
         # Set up and execute the training algorithm.
         trainer: pl.Trainer = instantiate(

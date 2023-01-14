@@ -18,3 +18,8 @@ scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
 scheduler_kwargs:
   T_max: ${ trainer.max_steps }
   eta_min: 5.0e-7
+scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
+# scheduler_kwargs:
+#   warmup_iters: 1000
+#   total_iters: ${ trainer.max_steps }
+#   eta_min: 5.0e-7
