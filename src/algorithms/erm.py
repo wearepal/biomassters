@@ -1,9 +1,8 @@
-from typing import Any, Optional, Protocol
+from typing import Optional, Protocol
 
-import attr
 from conduit.types import Stage
+from omegaconf.dictconfig import DictConfig
 from torch import Tensor
-import torch.nn.functional as F
 from typing_extensions import override
 
 from src.algorithms.base import Algorithm
@@ -19,9 +18,31 @@ class _Loss(Protocol):
         ...
 
 
-@attr.define(kw_only=True, eq=False)
 class Erm(Algorithm):
-    _loss_fn: Optional[_Loss] = None
+    def __init__(
+        self,
+        *,
+        lr: float = 5.0e-5,
+        weight_decay: float = 0.0,
+        optimizer_cls: str = "torch.optim.AdamW",
+        optimizer_kwargs: Optional[DictConfig] = None,
+        scheduler_cls: Optional[str] = None,
+        scheduler_kwargs: Optional[DictConfig] = None,
+        lr_sched_freq: int = 1,
+        test_on_best: bool = False,
+        loss_fn: Optional[_Loss] = None,
+    ) -> None:
+        super().__init__(
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer_cls=optimizer_cls,
+            optimizer_kwargs=optimizer_kwargs,
+            scheduler_cls=scheduler_cls,
+            scheduler_kwargs=scheduler_kwargs,
+            lr_sched_freq=lr_sched_freq,
+            test_on_best=test_on_best,
+        )
+        self._loss_fn = loss_fn
 
     @property
     def loss_fn(self) -> _Loss:

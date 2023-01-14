@@ -84,11 +84,17 @@ class SentinelRelay(Relay):
             )
             self.logger["group"] = default_group
         logger: WandbLogger = instantiate(self.logger, reinit=True)
-        if self.pred_dir is None:
-            pred_dir_exp = None
-        else:
-            pred_dir_exp = self.pred_dir / logger.experiment.id
-            raw_config["path_to_predictions"] = str(pred_dir_exp.resolve())
+
+        # pred_dir_full = self.pred_dir
+        # if self.pred_dir is not None:
+        #     # Guard against multiprocessing shenaningans
+        #         if logger._offline:
+        #             pred_subdir = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        #         else:
+        #             pred_subdir = logger.experiment.name
+        #         pred_dir_full = self.pred_dir / pred_subdir
+        #         loguru.logger.info(f"Predictions will be saved to '{pred_dir_full.resolve()}'.")
+        #         raw_config["path_to_predictions"] = str(pred_dir_full.resolve())
 
         logger.log_hyperparams(raw_config)  # type: ignore
         progbar = CdtProgressBar(theme=self.progbar_theme)
@@ -103,7 +109,7 @@ class SentinelRelay(Relay):
             callbacks=trainer_callbacks,
         )
         alg: Algorithm = instantiate(self.alg)
-        alg.run(dm=dm, model=model, trainer=trainer, pred_dir=pred_dir_exp)
+        alg.run(dm=dm, model=model, trainer=trainer, pred_dir=self.pred_dir)
 
         if self.score:
             loguru.logger.info("Scoring model.")

@@ -84,10 +84,10 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     init_dim: Optional[int] = None
     init_kernel_size: int = 7
     use_sparse_linear_attn: bool = False
-    apply_mid_spatial_attn: bool = True
     resnet_groups: int = 8
     spatial_decoder: bool = True
     use_gca: bool = False
+    cosine_sim_attn: bool = False
 
     @override
     def __call__(self, in_channels):
@@ -101,8 +101,8 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
             init_dim=self.init_dim,
             init_kernel_size=self.init_kernel_size,
             use_sparse_linear_attn=self.use_sparse_linear_attn,
-            apply_mid_spatial_attn=self.apply_mid_spatial_attn,
             spatial_decoder=self.spatial_decoder,
             resnet_groups=self.resnet_groups,
             use_gca=self.use_gca,
+            cosine_sim_attn=self.cosine_sim_attn,
         )

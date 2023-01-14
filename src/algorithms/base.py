@@ -1,8 +1,7 @@
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union, final
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union, final
 
 from PIL import Image
-import attr
 from conduit.data.structures import TernarySample
 from conduit.types import LRScheduler, Stage
 from hydra.utils import instantiate
@@ -14,6 +13,7 @@ from ranzen.torch.data import TrainingMode
 import torch
 from torch import Tensor, optim
 import torch.nn as nn
+from torch.nn.parameter import Parameter
 from torch.types import Number
 from typing_extensions import Self, TypeAlias, override
 
@@ -30,23 +30,54 @@ __all__ = [
 MetricDict: TypeAlias = Dict[str, Number]
 
 
-@attr.define(kw_only=True, eq=False)
-class Algorithm(pl.LightningModule):
-    model: nn.Module = attr.field(init=False)
-    pred_dir: Optional[Path] = attr.field(default=None, init=False)
-    lr: float = 5.0e-5
-    weight_decay: float = 0.0
-    optimizer_cls: str = "torch.optim.AdamW"
-    optimizer_kwargs: Optional[DictConfig] = None
-    scheduler_cls: Optional[str] = None
-    scheduler_kwargs: Optional[DictConfig] = None
-    lr_sched_freq: int = 1
-    test_on_best: bool = False
+def filter_params(
+    named_params: Iterable[Tuple[str, Parameter]],
+    weight_decay: float = 0.0,
+    exclusion_patterns: Tuple[str, ...] = ("bias",),
+) -> List[Dict[str, Union[List[Parameter], float]]]:
+    params: List[Parameter] = []
+    excluded_params: List[Parameter] = []
 
-    def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
-        obj = object.__new__(cls)
-        pl.LightningModule.__init__(obj)
-        return obj
+    for name, param in named_params:
+        if not param.requires_grad:
+            continue
+        elif any(pattern in name for pattern in exclusion_patterns):
+            excluded_params.append(param)
+        else:
+            params.append(param)
+
+    return [
+        {"params": params, "weight_decay": weight_decay},
+        {
+            "params": excluded_params,
+            "weight_decay": 0.0,
+        },
+    ]
+
+
+class Algorithm(pl.LightningModule):
+    def __init__(
+        self,
+        *,
+        lr: float = 5.0e-5,
+        weight_decay: float = 0.0,
+        optimizer_cls: str = "torch.optim.AdamW",
+        optimizer_kwargs: Optional[DictConfig] = None,
+        scheduler_cls: Optional[str] = None,
+        scheduler_kwargs: Optional[DictConfig] = None,
+        lr_sched_freq: int = 1,
+        test_on_best: bool = False,
+    ) -> None:
+        super().__init__()
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.optimizer_cls = optimizer_cls
+        self.optimizer_kwargs = optimizer_kwargs
+        self.scheduler_cls = scheduler_cls
+        self.scheduler_kwargs = scheduler_kwargs
+        self.lr_sched_freq = lr_sched_freq
+        self.test_on_best = test_on_best
+        self.pred_dir: Optional[Path] = None
 
     def training_step(
         self,
@@ -80,7 +111,7 @@ class Algorithm(pl.LightningModule):
     def _eval_epoch_end(self, outputs: List[Tensor], *, stage: Stage) -> MetricDict:
         mse = torch.cat(outputs, dim=0).mean()
         rmse = mse.sqrt()
-        return {f"{str(stage)}": to_item(rmse)}
+        return {f"{str(stage)}/RMSE": to_item(rmse)}
 
     @override
     @torch.no_grad()
@@ -109,7 +140,7 @@ class Algorithm(pl.LightningModule):
         self, batch: TestSample[List[str]], batch_idx: int, dataloader_idx: Optional[int] = None
     ) -> None:
         preds = self.forward(batch["image"])
-        preds_np = to_numpy(preds)
+        preds_np = to_numpy(preds.to(torch.float32)).squeeze()
         for pred, chip in zip(preds_np, batch["chip"]):
             im = Image.fromarray(pred)
             assert self.pred_dir is not None
@@ -134,12 +165,8 @@ class Algorithm(pl.LightningModule):
         if self.optimizer_kwargs is not None:
             optimizer_config.update(self.optimizer_kwargs)
 
-        optimizer = instantiate(
-            optimizer_config,
-            params=self.parameters(),
-            lr=self.lr,
-            weight_decay=self.weight_decay,
-        )
+        params = filter_params(self.named_parameters(), weight_decay=self.weight_decay)
+        optimizer = instantiate(optimizer_config, _partial_=True)(params=params, lr=self.lr)
 
         if self.scheduler_cls is not None:
             scheduler_config = DictConfig({"_target_": self.scheduler_cls})
@@ -181,6 +208,7 @@ class Algorithm(pl.LightningModule):
 
     def _setup(self, *, dm: SentinelDataModule, model: nn.Module, pred_dir: Optional[Path]) -> None:
         self.model = model
+        self.pred_dir = pred_dir
 
     @final
     def run(

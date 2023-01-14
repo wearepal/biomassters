@@ -2,11 +2,13 @@
 import math
 from typing import Any, Optional, Tuple, TypeVar, Union
 
-from einops import rearrange  # type: ignore
+from einops import rearrange, repeat  # type: ignore
+from einops.layers.torch import Rearrange  # type: ignore
 from einops_exts import rearrange_many  # type: ignore
 from rotary_embedding_torch import RotaryEmbedding  # type: ignore
 import torch
 from torch import Tensor, einsum, nn
+import torch.nn.functional as F
 from typing_extensions import override
 
 __all__ = ["Unet3dVd"]
@@ -96,7 +98,7 @@ def up_conv(dim: int) -> nn.ConvTranspose3d:
 V = TypeVar("V")
 
 
-def cast_tuple(val: V, length: Optional[int] = None) -> Tuple[V, ...]:
+def cast_tuple(val: Union[V, Tuple[V, ...]], *, length: Optional[int] = None) -> Tuple[V, ...]:
     if isinstance(val, list):
         val = tuple(val)
 
@@ -161,13 +163,21 @@ class AxialConv3d(nn.Module):
 
 
 # pseudo conv2d that uses conv3d but with kernel size of 1 across frames dimension
-def pseudo_conv2d(dim_in, dim_out, kernel, stride=1, padding=0, **kwargs):
-    kernel = cast_tuple(kernel, 2)
-    stride = cast_tuple(stride, 2)
-    padding = cast_tuple(padding, 2)
+def pseudo_conv2d(
+    in_channels: int,
+    *,
+    out_channels: int,
+    kernel_size: Union[int, Tuple[int, int]],
+    stride: Union[int, Tuple[int, int]] = 1,
+    padding=0,
+    **kwargs,
+):
+    kernel_size = cast_tuple(kernel_size, length=2)
+    stride = cast_tuple(stride, length=2)
+    padding = cast_tuple(padding, length=2)
 
-    if len(kernel) == 2:
-        kernel = (1, *kernel)
+    if len(kernel_size) == 2:
+        kernel_size = (1, *kernel_size)
 
     if len(stride) == 2:
         stride = (1, *stride)
@@ -175,7 +185,14 @@ def pseudo_conv2d(dim_in, dim_out, kernel, stride=1, padding=0, **kwargs):
     if len(padding) == 2:
         padding = (0, *padding)
 
-    return nn.Conv3d(dim_in, dim_out, kernel, stride=stride, padding=padding, **kwargs)
+    return nn.Conv3d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        **kwargs,
+    )
 
 
 def down_conv(dim) -> nn.Conv3d:
@@ -314,13 +331,13 @@ class GlobalContext(nn.Module):
 
     def __init__(self, *, dim_in, dim_out):
         super().__init__()
-        self.to_k = pseudo_conv2d(dim_in, 1, 1)
+        self.to_k = pseudo_conv2d(in_channels=dim_in, out_channels=1, kernel_size=1)
         hidden_dim = max(3, dim_out // 2)
 
         self.net = nn.Sequential(
-            pseudo_conv2d(dim_in, hidden_dim, 1),
+            pseudo_conv2d(in_channels=dim_in, out_channels=hidden_dim, kernel_size=1),
             nn.SiLU(),
-            pseudo_conv2d(hidden_dim, dim_out, 1),
+            pseudo_conv2d(in_channels=hidden_dim, out_channels=dim_out, kernel_size=1),
             nn.Sigmoid(),
         )
 
@@ -357,15 +374,17 @@ class Attention(nn.Module):
         heads: int = 4,
         dim_head: int = 32,
         rotary_emb: Optional[RotaryEmbedding] = None,
+        cosine_sim_attn=False,
     ) -> None:
         super().__init__()
-        self.scale = dim_head**-0.5
         self.heads = heads
         hidden_dim = dim_head * heads
-
         self.rotary_emb = rotary_emb
         self.to_qkv = nn.Linear(dim, hidden_dim * 3, bias=False)
         self.to_out = nn.Linear(hidden_dim, dim, bias=False)
+        self.cosine_sim_attn = cosine_sim_attn
+        self.scale = 1 if self.cosine_sim_attn else dim_head**-0.5
+        self.cosine_sim_scale = 16 if cosine_sim_attn else 1
 
     @override
     def forward(
@@ -385,8 +404,12 @@ class Attention(nn.Module):
             q = self.rotary_emb.rotate_queries_or_keys(q)
             k = self.rotary_emb.rotate_queries_or_keys(k)
 
+        if self.cosine_sim_attn:
+            q = F.normalize(q, dim=-1)
+            k = F.normalize(k, dim=-1)
+
         # similarity
-        sim = einsum("... h i d, ... h j d -> ... h i j", q, k)
+        sim = einsum("... h i d, ... h j d -> ... h i j", q, k) * self.cosine_sim_scale
 
         # relative positional bias
         if pos_bias is not None:
@@ -400,6 +423,152 @@ class Attention(nn.Module):
         out = einsum("... h i j, ... h j d -> ... h i d", attn, v)
         out = rearrange(out, "... h n d -> ... n (h d)")
         return self.to_out(out)
+
+
+class PerceiverAttention(nn.Module):
+    def __init__(
+        self, *, dim: int, dim_head: int = 64, heads: int = 8, cosine_sim_attn: bool = False
+    ) -> None:
+        super().__init__()
+        self.scale = dim_head**-0.5 if not cosine_sim_attn else 1
+        self.cosine_sim_attn = cosine_sim_attn
+        self.cosine_sim_scale = 16 if cosine_sim_attn else 1
+
+        self.heads = heads
+        inner_dim = dim_head * heads
+
+        self.norm = nn.LayerNorm(dim)
+        self.norm_latents = nn.LayerNorm(dim)
+
+        self.to_q = nn.Linear(dim, inner_dim, bias=False)
+        self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
+
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim, bias=False), nn.LayerNorm(dim))
+
+    @override
+    def forward(self, x, *, latents: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        x = self.norm(x)
+        latents = self.norm_latents(latents)
+
+        b, h = x.shape[0], self.heads
+
+        q = self.to_q(latents)
+
+        # the paper differs from Perceiver in which they also concat the key / values derived from the latents to be attended to
+        kv_input = torch.cat((x, latents), dim=-2)
+        k, v = self.to_kv(kv_input).chunk(2, dim=-1)
+
+        q, k, v = rearrange_many((q, k, v), "b n (h d) -> b h n d", h=h)
+
+        q = q * self.scale
+
+        # cosine sim attention
+
+        if self.cosine_sim_attn:
+            q = F.normalize(q, dim=-1)
+            k = F.normalize(k, dim=-1)
+
+        # similarities and masking
+
+        sim = einsum("... i d, ... j d  -> ... i j", q, k) * self.cosine_sim_scale
+
+        if mask is not None:
+            max_neg_value = -torch.finfo(sim.dtype).max
+            mask = F.pad(mask, (0, latents.shape[-2]), value=True)
+            mask = rearrange(mask, "b j -> b 1 1 j")
+            sim = sim.masked_fill(~mask, max_neg_value)
+
+        # attention
+
+        attn = sim.softmax(dim=-1)
+
+        out = einsum("... i j, ... j d -> ... i d", attn, v)
+        out = rearrange(out, "b h n d -> b n (h d)", h=h)
+        return self.to_out(out)
+
+
+def feedforward_block(dim: int, *, mult=2) -> nn.Sequential:
+    hidden_dim = int(dim * mult)
+    return nn.Sequential(
+        LayerNorm(dim),
+        nn.Linear(dim, hidden_dim, bias=False),
+        nn.GELU(),
+        LayerNorm(hidden_dim),
+        nn.Linear(hidden_dim, dim, bias=False),
+    )
+
+
+def masked_mean(x, *, dim: int, mask: Optional[Tensor] = None) -> Tensor:
+    if mask is None:
+        return x.mean(dim=dim)
+
+    denom = mask.sum(dim=dim, keepdim=True)
+    mask = rearrange(mask, "b n -> b n 1")
+    masked_t = x.masked_fill(~mask, 0.0)
+    return masked_t.sum(dim=dim) / denom.clamp(min=1e-5)
+
+
+class PerceiverResampler(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim: int,
+        depth: int,
+        dim_head: int = 64,
+        heads: int = 8,
+        num_latents: int = 64,
+        num_latents_mean_pooled: int = 4,  # number of latents derived from mean pooled representation of the sequence
+        max_seq_len: int = 512,
+        ff_mult: int = 4,
+        cosine_sim_attn: bool = False,
+    ) -> None:
+        super().__init__()
+        self.pos_emb = nn.Embedding(max_seq_len, dim)
+
+        self.latents = nn.Parameter(torch.randn(num_latents, dim))
+
+        self.to_latents_from_mean_pooled_seq = None
+
+        if num_latents_mean_pooled > 0:
+            self.to_latents_from_mean_pooled_seq = nn.Sequential(
+                LayerNorm(dim),
+                nn.Linear(dim, dim * num_latents_mean_pooled),
+                Rearrange("b (n d) -> b n d", n=num_latents_mean_pooled),
+            )
+
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        PerceiverAttention(
+                            dim=dim, dim_head=dim_head, heads=heads, cosine_sim_attn=cosine_sim_attn
+                        ),
+                        feedforward_block(dim=dim, mult=ff_mult),
+                    ]
+                )
+            )
+
+    def forward(self, x, mask=None):
+        n, device = x.shape[1], x.device
+        pos_emb = self.pos_emb(torch.arange(n, device=device))
+
+        x_with_pos = x + pos_emb
+
+        latents = repeat(self.latents, "n d -> b n d", b=x.shape[0])
+
+        if self.to_latents_from_mean_pooled_seq is not None:
+            meanpooled_seq = masked_mean(
+                x, dim=1, mask=torch.ones(x.shape[:2], device=x.device, dtype=torch.bool)
+            )
+            meanpooled_latents = self.to_latents_from_mean_pooled_seq(meanpooled_seq)
+            latents = torch.cat((meanpooled_latents, latents), dim=-2)
+
+        for attn, ff in self.layers:  # type: ignore
+            latents = attn(x_with_pos, latents, mask=mask) + latents
+            latents = ff(latents) + latents
+
+        return latents
 
 
 # model
@@ -416,11 +585,11 @@ class Unet3dVd(nn.Module):
         init_dim: Optional[int] = None,
         init_kernel_size: int = 7,
         use_sparse_linear_attn: bool = True,
-        apply_mid_spatial_attn: bool = True,
         resnet_groups: int = 8,
         max_distance: int = 32,
         spatial_decoder: bool = True,
         use_gca: bool = False,
+        cosine_sim_attn: bool = False,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -435,7 +604,13 @@ class Unet3dVd(nn.Module):
         temporal_attn = lambda dim: EinopsToAndFrom(
             from_einops="b c f h w",
             to_einops="b (h w) f c",
-            fn=Attention(dim, heads=n_attn_heads, dim_head=attn_head_dim, rotary_emb=rotary_emb),
+            fn=Attention(
+                dim,
+                heads=n_attn_heads,
+                dim_head=attn_head_dim,
+                rotary_emb=rotary_emb,
+                cosine_sim_attn=cosine_sim_attn,
+            ),
         )
 
         self.time_rel_pos_bias = RelativePositionBias(heads=n_attn_heads, max_distance=max_distance)
@@ -490,16 +665,13 @@ class Unet3dVd(nn.Module):
         mid_dim = dims[-1]
         self.mid_block1 = ResnetBlock3d(in_dim=mid_dim, out_dim=mid_dim)
 
-        if apply_mid_spatial_attn:
-            spatial_attn = EinopsToAndFrom(
-                from_einops="b c f h w",
-                to_einops="b f (h w) c",
-                fn=Attention(mid_dim, heads=n_attn_heads),
-            )
+        spatial_attn = EinopsToAndFrom(
+            from_einops="b c f h w",
+            to_einops="b f (h w) c",
+            fn=Attention(mid_dim, heads=n_attn_heads),
+        )
 
-            self.mid_spatial_attn = Residual(PreNorm(mid_dim, fn=spatial_attn))
-        else:
-            self.mid_spatial_attn = nn.Identity()
+        self.mid_spatial_attn = Residual(PreNorm(mid_dim, fn=spatial_attn))
         self.mid_temporal_attn = Residual(PreNorm(mid_dim, fn=temporal_attn(mid_dim)))
 
         self.mid_block2 = ResnetBlock3d(
@@ -545,19 +717,19 @@ class Unet3dVd(nn.Module):
         time_rel_pos_bias = self.time_rel_pos_bias(x.size(2), device=x.device)
         x = self.init_conv(x)
         x = self.init_temporal_attn(x, pos_bias=time_rel_pos_bias)
-        r = x.clone()
+        init_conv_residual = x.clone()
         if self.spatial_decoder:
-            r = r.mean(dim=2, keepdim=True)
-        h = []
+            init_conv_residual = init_conv_residual.mean(dim=2, keepdim=True)
+        hiddens = []
         for block1, block2, spatial_attn, temporal_attn, downsample in self.encoder_blocks:  # type: ignore
             x = block1(x)
             x = block2(x)
             x = spatial_attn(x)
             x = temporal_attn(x, pos_bias=time_rel_pos_bias)
             if self.spatial_decoder:
-                h.append(x.mean(dim=2, keepdim=True))
+                hiddens.append(x.mean(dim=2, keepdim=True))
             else:
-                h.append(x)
+                hiddens.append(x)
             x = downsample(x)
 
         x = self.mid_block1(x)
@@ -569,7 +741,7 @@ class Unet3dVd(nn.Module):
             x = x.mean(dim=2, keepdim=True)
 
         for block1, block2, spatial_attn, temporal_attn, upsample in self.decoder_blocks:  # type: ignore
-            x = torch.cat((x, h.pop()), dim=1)
+            x = torch.cat((x, hiddens.pop()), dim=1)
             x = block1(x)
             x = block2(x)
             x = spatial_attn(x)
@@ -580,7 +752,7 @@ class Unet3dVd(nn.Module):
             )
             x = upsample(x)
 
-        x = torch.cat((x, r), dim=1)
+        x = torch.cat((x, init_conv_residual), dim=1)
         # temporal pooling
         x = x.mean(dim=2, keepdim=True)
         return self.final_conv(x).squeeze(dim=2)

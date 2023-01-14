@@ -7,17 +7,17 @@ from src.algorithms import Erm
 from src.models import Unet3dVdFn, UnetFn, UnetPlusPlusFn
 from src.relay import SentinelRelay
 
-if __name__ == "__main__":
-    torch.multiprocessing.set_sharing_strategy("file_system")
-    TO_IGNORE = (
-        "torch.nn.modules.module",
-        "torch.distributed.distributed_c10d",
-        "pytorch_lightning.trainer.connectors.data_connector",
-        "lightning_lite.plugins.environments",
-    )
-    for module in TO_IGNORE:
-        warnings.filterwarnings("ignore", module=module)
+torch.multiprocessing.set_sharing_strategy("file_system")
+TO_IGNORE = (
+    "torch.nn.modules.module",
+    "torch.distributed.distributed_c10d",
+    "pytorch_lightning.trainer.connectors.data_connector",
+    "lightning_lite.plugins.environments",
+)
+for module in TO_IGNORE:
+    warnings.filterwarnings("ignore", module=module)
 
+if __name__ == "__main__":
     alg_ops = [
         Option(Erm, "erm"),
     ]

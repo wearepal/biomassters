@@ -40,34 +40,53 @@ class TrainValTestPredSplit(Generic[TD]):
 
 @attr.define(kw_only=True)
 class SentinelDataModule(pl.LightningDataModule):
-    train_batch_size: int = 16
-    _eval_batch_size: Optional[int] = None
-    num_workers: int = 0
-    persist_workers: bool = False
-    pin_memory: bool = False
-
-    root: Union[Path, str] = "/srv/galene0/shared/data/biomassters/"
-    tile_dir: Optional[Path] = None
-    group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP
-    preprocess: bool = True
-    n_pp_jobs: int = 4
-    save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.NP
-    missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.INF
-    save_precision: SentinelDataset.SavePrecision = SentinelDataset.SavePrecision.HALF
-
-    split_seed: int = 47
-    val_prop: float = 0.2
-    test_prop: Optional[float] = None
-
-    _train_data: Optional[TrainData] = attr.field(default=None, init=False)
-    _val_data: Optional[EvalData] = attr.field(default=None, init=False)
-    _test_data: Optional[EvalData] = attr.field(default=None, init=False)
-    _pred_data: Optional[PredData] = attr.field(default=None, init=False)
-    _train_transforms: Optional[TrainTransform] = None
-    _eval_transforms: Optional[EvalTransform] = None
-
-    def __attrs_pre_init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        train_batch_size: int = 16,
+        eval_batch_size: Optional[int] = None,
+        num_workers: int = 0,
+        persist_workers: bool = False,
+        pin_memory: bool = False,
+        root: Union[Path, str] = "/srv/galene0/shared/data/biomassters/",
+        tile_dir: Optional[Path] = None,
+        group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP,
+        preprocess: bool = True,
+        n_pp_jobs: int = 4,
+        save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.NP,
+        missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.INF,
+        save_precision: SentinelDataset.SavePrecision = SentinelDataset.SavePrecision.HALF,
+        split_seed: int = 47,
+        val_prop: float = 0.2,
+        test_prop: Optional[float] = None,
+        train_transforms: Optional[TrainTransform] = None,
+        eval_transforms: Optional[EvalTransform] = None,
+    ) -> None:
         super().__init__()
+        self.train_batch_size = train_batch_size
+        self._eval_batch_size = eval_batch_size
+        self.num_workers = num_workers
+        self.persist_workers = persist_workers
+        self.pin_memory = pin_memory
+        self.root = root
+        self.tile_dir = tile_dir
+        self.group_by = group_by
+        self.preprocess = preprocess
+        self.n_pp_jobs = n_pp_jobs
+        self.save_with = save_with
+        self.missing_value = missing_value
+        self.save_precision = save_precision
+        self.split_seed = split_seed
+        self.val_prop = val_prop
+        self.test_prop = test_prop
+
+        self._train_transforms = train_transforms
+        self._eval_transforms = eval_transforms
+
+        self._pred_data: Optional[PredData] = None
+        self._train_data: Optional[TrainData] = None
+        self._val_data: Optional[EvalData] = None
+        self._test_data: Optional[EvalData] = None
 
     @property
     def eval_batch_size(self) -> int:
