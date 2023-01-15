@@ -568,6 +568,7 @@ class ClampInput(InputTransform):
 
 class RandomHorizontalFlip(TargetTransform):
     DIMS = (-1,)
+
     def __init__(self, p: float = 0.5) -> None:
         self.p = p
 
@@ -581,6 +582,7 @@ class RandomHorizontalFlip(TargetTransform):
 
 class RandomVerticalFlip(TargetTransform):
     DIMS = (-2,)
+
     def __init__(self, p: float = 0.5) -> None:
         self.p = p
 
@@ -590,6 +592,7 @@ class RandomVerticalFlip(TargetTransform):
             inputs["image"] = torch.flip(inputs["image"], dims=self.DIMS)
             inputs["label"] = torch.flip(inputs["label"], dims=self.DIMS)
         return inputs
+
 
 class RandomRotation(TargetTransform):
     def __init__(self, p: float = 0.5) -> None:

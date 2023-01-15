@@ -1,0 +1,50 @@
+# @package _global_
+
+defaults:
+    - override /model: unet3d_vd/spatial_128dim
+    - override /dm: all_months/zscore_norm
+    - override /alg: erm
+    - override /logger: pal
+    - override /checkpointer: bio
+    - _self_
+
+alg:
+  lr: 1e-4
+  weight_decay: 1.e-4
+  lr_sched_freq: 1
+  test_on_best: false
+  loss_fn: null
+  optimizer_cls: 'deepspeed.ops.adam.FusedAdam'
+  # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
+  # scheduler_kwargs:
+  #   T_max: ${ trainer.max_steps }
+  #   eta_min: 5.0e-7
+  scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
+  scheduler_kwargs:
+    warmup_iters: 1000
+    total_iters: ${ trainer.max_steps }
+    lr_min: 5.0e-7
+
+dm:
+  num_workers: 3
+  train_batch_size: 1
+
+trainer:
+  precision: 16
+  max_steps: 30000
+  val_check_interval: 500
+  accelerator: gpu
+  devices: 8
+  strategy: deepspeed_stage_2
+
+logger:
+  group: unet3d_128dim_spatial_attn_bs1
+  tags:
+    - base_dim_128
+    - attn_head_dim_64
+    - spatial_attn
+    - spatial_decoder
+    - unet3d
+    - zscore_norm
+
+pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/

@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Optional, Protocol
 
 from conduit.types import Stage
@@ -31,6 +32,7 @@ class Erm(Algorithm):
         lr_sched_freq: int = 1,
         test_on_best: bool = False,
         loss_fn: Optional[_Loss] = None,
+        ckpt_path: Optional[Path] = None,
     ) -> None:
         super().__init__(
             lr=lr,
@@ -41,6 +43,7 @@ class Erm(Algorithm):
             scheduler_kwargs=scheduler_kwargs,
             lr_sched_freq=lr_sched_freq,
             test_on_best=test_on_best,
+            ckpt_path=ckpt_path,
         )
         self._loss_fn = loss_fn
 

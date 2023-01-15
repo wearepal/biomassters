@@ -1,0 +1,20 @@
+---
+defaults:
+  - /schema/model: unet3d
+  - _self_
+dim: 128
+dim_mults: 
+  - 1
+  - 2
+  - 4
+  - 8
+n_attn_heads: 8
+attn_head_dim: 64
+init_dim: null
+init_kernel_size: 7
+use_sparse_linear_attn: true
+resnet_groups: 8
+spatial_decoder: true
+use_gca: false
+cosine_sim_attn: false
+apply_mid_spatial_attn: true

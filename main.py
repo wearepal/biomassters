@@ -9,10 +9,12 @@ from src.relay import SentinelRelay
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 TO_IGNORE = (
-    "torch.nn.modules.module",
-    "torch.distributed.distributed_c10d",
-    "pytorch_lightning.trainer.connectors.data_connector",
     "lightning_lite.plugins.environments",
+    "pytorch_lightning.loops.epoch.prediction_epoch_loop",
+    "pytorch_lightning.trainer.connectors.data_connector",
+    "torch.distributed.distributed_c10d",
+    "torch.nn.modules.module",
+    "torch.optim.lr_scheduler",
 )
 for module in TO_IGNORE:
     warnings.filterwarnings("ignore", module=module)

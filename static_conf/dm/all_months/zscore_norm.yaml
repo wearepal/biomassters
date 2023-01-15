@@ -46,6 +46,9 @@ train_transforms:
       posinf: 0.0
       neginf: 0.0
 
+    - _target_: src.data.transforms.RandomHorizontalFlip
+      p: 0.5
+
     - _target_: src.data.transforms.ZScoreNormalizeTarget
       mean: 63.3297
       std: 71.8312

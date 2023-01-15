@@ -78,7 +78,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     IS_TEMPORAL: ClassVar[bool] = True
 
     dim: int = 64
-    multipliers: Tuple[int, ...] = (1, 2, 4, 8)
+    dim_mults: Tuple[int, ...] = (1, 2, 4, 8)
     n_attn_heads: int = 8
     attn_head_dim: int = 32
     init_dim: Optional[int] = None
@@ -88,6 +88,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     spatial_decoder: bool = True
     use_gca: bool = False
     cosine_sim_attn: bool = False
+    apply_mid_spatial_attn: bool = True
 
     @override
     def __call__(self, in_channels):
@@ -95,7 +96,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
             in_channels=in_channels,
             out_channels=1,
             dim=self.dim,
-            multipliers=self.multipliers,
+            dim_mults=self.dim_mults,
             n_attn_heads=self.n_attn_heads,
             attn_head_dim=self.attn_head_dim,
             init_dim=self.init_dim,
@@ -105,4 +106,5 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
             resnet_groups=self.resnet_groups,
             use_gca=self.use_gca,
             cosine_sim_attn=self.cosine_sim_attn,
+            apply_mid_spatial_attn=self.apply_mid_spatial_attn,
         )

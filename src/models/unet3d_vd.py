@@ -543,17 +543,19 @@ class EncoderStage(nn.Module):
     def __init__(
         self,
         *,
+        attn_head_dim: int,
+        cosine_sim_attn: bool,
         dim_in: int,
         dim_out: int,
-        groups: int,
-        use_gca: bool,
         downsample: bool,
+        groups: int,
         n_attn_heads: int,
-        attn_head_dim: int,
-        temporal_pooling: bool,
         rotary_emb: Optional[RotaryEmbedding],
-        cosine_sim_attn: bool,
+        temporal_pooling: bool,
+        use_gca: bool,
+        use_sparse_linear_attn: bool,
     ) -> None:
+        super().__init__()
         self.rn_block1 = ResnetBlock3d(
             in_dim=dim_in, out_dim=dim_out, groups=groups, use_gca=use_gca
         )
@@ -564,7 +566,7 @@ class EncoderStage(nn.Module):
 
         self.spatial_attn = (
             Residual(PreNorm(dim_out, fn=SpatialLinearAttention(dim_out, heads=n_attn_heads)))
-            if (n_attn_heads > 0)
+            if use_sparse_linear_attn
             else nn.Identity()
         )
 
@@ -580,18 +582,16 @@ class EncoderStage(nn.Module):
                 ),
             )
         )
-        self.temporal_pool = (
-            nn.AdaptiveMaxPool3d((1, None, None)) if temporal_pooling else nn.Identity()
-        )
-        self.downsample = down_conv(dim_out) if not downsample else nn.Identity()
+        self.pool = nn.AdaptiveMaxPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+        self.downsample = down_conv(dim_out) if downsample else nn.Identity()
 
     @override
-    def forward(self, x: Tensor, *, time_rel_pos_bias: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, *, pos_bias: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.rn_block1(x)
         x = self.rn_block2(x)
         x = self.spatial_attn(x)
-        x = self.temporal_attn(x, pos_bias=time_rel_pos_bias)
-        shortcut = self.temporal_pool(x)
+        x = self.temporal_attn(x, pos_bias=pos_bias)
+        shortcut = self.pool(x)
         return self.downsample(x), shortcut
 
 
@@ -599,34 +599,34 @@ class DecoderStage(nn.Module):
     def __init__(
         self,
         *,
+        attn_head_dim: int,
+        cosine_sim_attn: bool,
         dim_in: int,
         dim_out: int,
         groups: int,
-        use_gca: bool,
         n_attn_heads: int,
-        attn_head_dim: int,
+        rotary_emb: Optional[RotaryEmbedding],
         spatial_only: bool,
         upsample: bool,
-        rotary_emb: Optional[RotaryEmbedding] = None,
-        cosine_sim_attn: bool = False,
-        use_sparse_linear_attn: bool = True,
+        use_gca: bool,
+        use_sparse_linear_attn: bool,
     ) -> None:
-
+        super().__init__()
         self.rn_block1 = ResnetBlock3d(
             # each block receives the concateation of the
             # previous stage's output and the skip connection
             # from the encoder.
-            in_dim=dim_out * 2,
-            out_dim=dim_in,
+            in_dim=dim_in * 2,
+            out_dim=dim_out,
             groups=groups,
             use_gca=use_gca,
         )
 
         self.rn_block2 = ResnetBlock3d(
-            in_dim=dim_in, out_dim=dim_in, groups=groups, use_gca=use_gca
+            in_dim=dim_out, out_dim=dim_out, groups=groups, use_gca=use_gca
         )
         self.spatial_attn = (
-            Residual(PreNorm(dim_in, fn=SpatialLinearAttention(dim_in, heads=n_attn_heads)))
+            Residual(PreNorm(dim_out, fn=SpatialLinearAttention(dim_out, heads=n_attn_heads)))
             if use_sparse_linear_attn
             else nn.Identity()
         )
@@ -647,17 +647,75 @@ class DecoderStage(nn.Module):
                 )
             )
         )
-        self.upsample = up_conv(dim_in) if upsample else nn.Identity()
+        self.upsample = up_conv(dim_out) if upsample else nn.Identity()
 
     @override
-    def forward(self, x: Tensor, *, shortcut: Tensor, time_rel_pos_bias: Tensor) -> Tensor:
+    def forward(self, x: Tensor, *, shortcut: Tensor, pos_bias: Tensor) -> Tensor:
         x = torch.cat((x, shortcut), dim=1)
         x = self.rn_block1(x)
         x = self.rn_block2(x)
         x = self.spatial_attn(x)
         if self.temporal_attn is not None:
-            x = self.temporal_attn(x, pos_bias=time_rel_pos_bias)
+            x = self.temporal_attn(x, pos_bias=pos_bias)
         return self.upsample(x)
+
+
+class MiddleStage(nn.Module):
+    def __init__(
+        self,
+        *,
+        apply_mid_spatial_attn: bool,
+        attn_head_dim: int,
+        cosine_sim_attn: bool,
+        dim: int,
+        groups: int,
+        n_attn_heads: int,
+        rotary_emb: Optional[RotaryEmbedding],
+        temporal_pooling: bool,
+        use_gca: bool,
+    ) -> None:
+        super().__init__()
+
+        self.mid_block1 = ResnetBlock3d(in_dim=dim, out_dim=dim)
+
+        spatial_attn = EinopsToAndFrom(
+            from_einops="b c f h w",
+            to_einops="b f (h w) c",
+            fn=Attention(dim, heads=n_attn_heads),
+        )
+
+        self.mid_spatial_attn = (
+            Residual(PreNorm(dim, fn=spatial_attn)) if apply_mid_spatial_attn else nn.Identity()
+        )
+
+        self.mid_temporal_attn = Residual(
+            PreNorm(
+                dim,
+                fn=temporal_attention(
+                    dim=dim,
+                    n_attn_heads=n_attn_heads,
+                    attn_head_dim=attn_head_dim,
+                    rotary_emb=rotary_emb,
+                    cosine_sim_attn=cosine_sim_attn,
+                ),
+            )
+        )
+
+        self.mid_block2 = ResnetBlock3d(
+            in_dim=dim,
+            out_dim=dim,
+            groups=groups,
+            use_gca=use_gca,
+        )
+        self.pool = nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+
+    @override
+    def forward(self, x: Tensor, *, pos_bias: Tensor) -> Tensor:
+        x = self.mid_block1(x)
+        x = self.mid_spatial_attn(x)
+        x = self.mid_temporal_attn(x, pos_bias=pos_bias)
+        x = self.pool(x)
+        return x
 
 
 # model
@@ -668,7 +726,7 @@ class Unet3dVd(nn.Module):
         in_channels: int,
         dim: int = 64,
         out_channels: Optional[int] = None,
-        multipliers: Tuple[int, ...] = (1, 2, 4, 8),
+        dim_mults: Tuple[int, ...] = (1, 2, 4, 8),
         n_attn_heads: int = 8,
         attn_head_dim: int = 32,
         init_dim: Optional[int] = None,
@@ -679,6 +737,7 @@ class Unet3dVd(nn.Module):
         spatial_decoder: bool = True,
         use_gca: bool = False,
         cosine_sim_attn: bool = False,
+        apply_mid_spatial_attn: bool = True,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -719,7 +778,7 @@ class Unet3dVd(nn.Module):
         self.init_temporal_attn = Residual(PreNorm(init_dim, fn=temporal_attn(init_dim)))
 
         # dimensions
-        dims = [init_dim, *map(lambda m: dim * m, multipliers)]
+        dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
         # layers
@@ -743,40 +802,21 @@ class Unet3dVd(nn.Module):
                     attn_head_dim=attn_head_dim,
                     rotary_emb=rotary_emb,
                     cosine_sim_attn=cosine_sim_attn,
+                    use_sparse_linear_attn=use_sparse_linear_attn,
                 )
-                # nn.ModuleList(
-                #     [
-                #         ResnetBlock3d(
-                #             in_dim=dim_in, out_dim=dim_out, groups=resnet_groups, use_gca=use_gca
-                #         ),
-                #         ResnetBlock3d(
-                #             in_dim=dim_out, out_dim=dim_out, groups=resnet_groups, use_gca=use_gca
-                #         ),
-                #         Residual(
-                #             PreNorm(dim_out, fn=SpatialLinearAttention(dim_out, heads=n_attn_heads))
-                #         )
-                #         if use_sparse_linear_attn
-                #         else nn.Identity(),
-                #         Residual(PreNorm(dim_out, fn=temporal_attn(dim_out))),
-                #         down_conv(dim_out) if not is_last else nn.Identity(),
-                #     ]
-                # )
             )
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResnetBlock3d(in_dim=mid_dim, out_dim=mid_dim)
-
-        spatial_attn = EinopsToAndFrom(
-            from_einops="b c f h w",
-            to_einops="b f (h w) c",
-            fn=Attention(mid_dim, heads=n_attn_heads),
-        )
-
-        self.mid_spatial_attn = Residual(PreNorm(mid_dim, fn=spatial_attn))
-        self.mid_temporal_attn = Residual(PreNorm(mid_dim, fn=temporal_attn(mid_dim)))
-
-        self.mid_block2 = ResnetBlock3d(
-            in_dim=mid_dim, out_dim=mid_dim, groups=resnet_groups, use_gca=use_gca
+        self.middle_stage = MiddleStage(
+            dim=mid_dim,
+            groups=resnet_groups,
+            use_gca=use_gca,
+            n_attn_heads=n_attn_heads,
+            attn_head_dim=attn_head_dim,
+            rotary_emb=rotary_emb,
+            cosine_sim_attn=cosine_sim_attn,
+            apply_mid_spatial_attn=apply_mid_spatial_attn,
+            temporal_pooling=spatial_decoder,
         )
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
@@ -784,8 +824,8 @@ class Unet3dVd(nn.Module):
 
             self.decoder_stages.append(
                 DecoderStage(
-                    dim_in=dim_in,
-                    dim_out=dim_out,
+                    dim_in=dim_out,
+                    dim_out=dim_in,
                     groups=resnet_groups,
                     use_gca=use_gca,
                     upsample=not is_last,
@@ -794,41 +834,15 @@ class Unet3dVd(nn.Module):
                     rotary_emb=rotary_emb,
                     cosine_sim_attn=cosine_sim_attn,
                     spatial_only=spatial_decoder,
+                    use_sparse_linear_attn=use_sparse_linear_attn,
                 )
-                # nn.ModuleList(
-                #     [
-                #         ResnetBlock3d(
-                #             # each block receives the concateation of the
-                #             # previous stage's output and the skip connection
-                #             # from the encoder.
-                #             in_dim=dim_out * 2,
-                #             out_dim=dim_in,
-                #             groups=resnet_groups,
-                #             use_gca=use_gca,
-                #         ),
-                #         ResnetBlock3d(
-                #             in_dim=dim_in, out_dim=dim_in, groups=resnet_groups, use_gca=use_gca
-                #         ),
-                #         Residual(
-                #             PreNorm(dim_in, fn=SpatialLinearAttention(dim_in, heads=n_attn_heads))
-                #         )
-                #         if use_sparse_linear_attn
-                #         else nn.Identity(),
-                #         nn.Identity()
-                #         if self.spatial_decoder
-                #         else Residual(PreNorm(dim_in, fn=temporal_attn(dim_in))),
-                #         up_conv(dim_in) if not is_last else nn.Identity(),
-                #     ]
-                # )
             )
 
+        self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
         # Final (2d) conv block operating on temporally-pooled features
         self.final_conv = nn.Sequential(
             ResnetBlock3d(in_dim=dim * 2, out_dim=dim, groups=resnet_groups, use_gca=True),
             nn.Conv3d(in_channels=dim, out_channels=self.out_channels, kernel_size=1),
-        )
-        self.temporal_pool = (
-            nn.AdaptiveAvgPool3d((1, None, None)) if self.spatial_decoder else nn.Identity()
         )
 
     @override
@@ -839,40 +853,18 @@ class Unet3dVd(nn.Module):
         init_conv_residual = x.clone()
         if self.spatial_decoder:
             init_conv_residual = init_conv_residual.mean(dim=2, keepdim=True)
+
         shortcuts = []
         for stage in self.encoder_stages:
             stage = cast(EncoderStage, stage)
-            x, shortcut = stage.forward(x, time_rel_pos_bias=time_rel_pos_bias)
+            x, shortcut = stage.forward(x, pos_bias=time_rel_pos_bias)
             shortcuts.append(shortcut)
-        # for block1, block2, spatial_attn, temporal_attn, downsample in self.encoder_blocks:  # type: ignore
-        #     x = block1(x)
-        #     x = block2(x)
-        #     x = spatial_attn(x)
-        #     x = temporal_attn(x, pos_bias=time_rel_pos_bias)
-        #     hiddens.append(self.temporal_pool(x))
-        #     x = downsample(x)
 
-        x = self.mid_block1(x)
-        x = self.mid_spatial_attn(x)
-        x = self.mid_temporal_attn(x, pos_bias=time_rel_pos_bias)
-        x = self.mid_block2(x)
+        x = self.middle_stage.forward(x, pos_bias=time_rel_pos_bias)
 
-        x = self.temporal_pool(x)
-
-        # for block1, block2, spatial_attn, temporal_attn, upsample in self.decoder_blocks:  # type: ignore
-        #     x = torch.cat((x, shortcuts.pop()), dim=1)
-        #     x = block1(x)
-        #     x = block2(x)
-        #     x = spatial_attn(x)
-        #     x = (
-        #         temporal_attn(x)
-        #         if self.spatial_decoder
-        #         else temporal_attn(x, pos_bias=time_rel_pos_bias)
-        #     )
-        #     x = upsample(x)
         for stage in self.decoder_stages:
             stage = cast(DecoderStage, stage)
-            x = stage.forward(x, shortcut=shortcuts.pop(), time_rel_pos_bias=time_rel_pos_bias)
+            x = stage.forward(x, shortcut=shortcuts.pop(), pos_bias=time_rel_pos_bias)
 
         x = torch.cat((x, init_conv_residual), dim=1)
         # temporal pooling

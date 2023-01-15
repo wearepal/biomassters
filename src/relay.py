@@ -86,25 +86,15 @@ class SentinelRelay(Relay):
             self.logger["group"] = default_group
         logger: WandbLogger = instantiate(self.logger, reinit=True)
 
-        # pred_dir_full = self.pred_dir
-        # if self.pred_dir is not None:
-        #     # Guard against multiprocessing shenaningans
-        #         if logger._offline:
-        #             pred_subdir = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        #         else:
-        #             pred_subdir = logger.experiment.name
-        #         pred_dir_full = self.pred_dir / pred_subdir
-        #         loguru.logger.info(f"Predictions will be saved to '{pred_dir_full.resolve()}'.")
-        #         raw_config["path_to_predictions"] = str(pred_dir_full.resolve())
-
-        if logger._offline:
-            subdir_name = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        else:
-            subdir_name = logger.experiment.name
-        # Augment the checkpointer's dirpath with a timestamp/wandb name for uniqueness
-        checkpointer_dirpath = Path(self.checkpointer["dirpath"]) / subdir_name
-        self.checkpointer["dirpath"] = checkpointer_dirpath
-        raw_config["checkpointer"]["dirpath"] = str(checkpointer_dirpath.resolve())
+        # Augment the save paths with a timestamp/wandb name for uniqueness
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        pred_dir_full = None
+        if self.pred_dir is not None:
+            pred_dir_full = self.pred_dir / timestamp
+            raw_config["path_to_predictions"] = str(pred_dir_full.resolve())
+        ckpt_dir_path_full = Path(str(self.checkpointer["dirpath"])) / timestamp
+        self.checkpointer["dirpath"] = ckpt_dir_path_full
+        raw_config["checkpointer"]["dirpath"] = str(ckpt_dir_path_full.resolve())
 
         logger.log_hyperparams(raw_config)  # type: ignore
         progbar = CdtProgressBar(theme=self.progbar_theme)
@@ -118,7 +108,7 @@ class SentinelRelay(Relay):
             callbacks=trainer_callbacks,
         )
         alg: Algorithm = instantiate(self.alg)
-        alg.run(dm=dm, model=model, trainer=trainer, pred_dir=self.pred_dir)
+        alg.run(dm=dm, model=model, trainer=trainer, pred_dir=pred_dir_full)
 
         if self.score:
             loguru.logger.info("Scoring model.")

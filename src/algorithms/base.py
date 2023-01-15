@@ -17,7 +17,7 @@ from torch.nn.parameter import Parameter
 from torch.types import Number
 from typing_extensions import Self, TypeAlias, override
 
-from src.data import SentinelDataModule
+from src.data import SentinelDataModule, SentinelDataset
 from src.loss import stable_mse_loss
 from src.types import TestSample, TrainSample
 from src.utils import to_item, to_numpy
@@ -68,6 +68,7 @@ class Algorithm(pl.LightningModule):
         lr_sched_freq: int = 1,
         test_on_best: bool = False,
         predict_with_best: bool = True,
+        ckpt_path: Optional[Path] = None,
     ) -> None:
         super().__init__()
         self.lr = lr
@@ -80,6 +81,7 @@ class Algorithm(pl.LightningModule):
         self.test_on_best = test_on_best
         self.predict_with_best = predict_with_best
         self.pred_dir: Optional[Path] = None
+        self.ckpt_path = ckpt_path if ckpt_path is None else str(ckpt_path.resolve())
 
     def training_step(
         self,
@@ -142,9 +144,12 @@ class Algorithm(pl.LightningModule):
         self, batch: TestSample[List[str]], batch_idx: int, dataloader_idx: Optional[int] = None
     ) -> None:
         preds = self.forward(batch["image"])
-        preds_np = to_numpy(preds.to(torch.float32)).squeeze()
+        preds_np = to_numpy(
+            preds.to(torch.float32).view(-1, SentinelDataset.RESOLUTION, SentinelDataset.RESOLUTION)
+        )
         for pred, chip in zip(preds_np, batch["chip"]):
             im = Image.fromarray(pred)
+            assert im.size == (256, 256)
             assert self.pred_dir is not None
             save_path = self.pred_dir / f"{chip}_agbm.tif"
             im.save(save_path, format="TIFF", save_all=True)
@@ -190,10 +195,8 @@ class Algorithm(pl.LightningModule):
     def _run_internal(
         self, dm: SentinelDataModule, *, trainer: pl.Trainer, test: bool = True
     ) -> Self:
-        # Run routines to tune hyperparameters before training.
-        trainer.tune(model=self, datamodule=dm)
         # Train the model
-        trainer.fit(model=self, datamodule=dm)
+        trainer.fit(model=self, datamodule=dm, ckpt_path=self.ckpt_path)
         if test:
             # Test the model if desired
             trainer.test(
@@ -203,10 +206,15 @@ class Algorithm(pl.LightningModule):
             )
         if self.pred_dir is not None:
             self.pred_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Generating predictions and saving them to {self.pred_dir.resolve()}.")
-            trainer.predict(
-                model=self, datamodule=dm, ckpt_path="best" if self.predict_with_best else None
-            )
+            logger.info(f"Generating predictions and saving them to '{self.pred_dir.resolve()}'.")
+            try:
+                trainer.predict(
+                    model=self, datamodule=dm, ckpt_path="best" if self.predict_with_best else None
+                )
+            # setting ckpt_path to 'best' without any validation loops having been performed
+            # will result in an error
+            except ValueError:
+                trainer.predict(model=self, datamodule=dm)
 
         return self
 
