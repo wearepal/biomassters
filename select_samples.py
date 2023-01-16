@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from src.data import SentinelDataset
 import src.data.transforms as T
+from src.utils import some
 
 warnings.filterwarnings("ignore", r"All-NaN (slice|axis) encountered")
 
@@ -52,8 +53,7 @@ def calc_frac_over_thresh(img: Tensor, *, thresh: float = 0.5) -> float:
 
 def calc_quality_scores(dataset: SentinelDataset) -> pd.DataFrame:
     scores = []
-    metadata = dataset.metadata.to_numpy()
-    assert dataset.month is not None
+    assert some(dataset.month)
     for idx, sample in tqdm(enumerate(iter(dataset)), total=len(dataset)):
         chip, month_idx = dataset.chip[idx], dataset.month[idx]
         tile = sample["image"].detach().clone().cpu()
@@ -99,8 +99,10 @@ def find_best_months(df_scores: pd.DataFrame) -> pd.DataFrame:
 if __name__ == "__main__":
     root = Path("/srv/galene0/shared/data/biomassters/")
     transforms = T.Compose(
-        indices.AppendNDVI(index_nir=6, index_red=2),  # NDVI, index 15
-        T.AppendRatioAB(index_a=11, index_b=12),  # VV/VH Ascending, index 16
+        [
+            indices.AppendNDVI(index_nir=6, index_red=2),
+            T.AppendRatioAB(index_a=11, index_b=12),
+        ]
     )
     fact_func = partial(
         SentinelDataset,

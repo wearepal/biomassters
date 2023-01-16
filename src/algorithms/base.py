@@ -20,7 +20,7 @@ from typing_extensions import Self, TypeAlias, override
 from src.data import SentinelDataModule, SentinelDataset
 from src.loss import stable_mse_loss
 from src.types import TestSample, TrainSample
-from src.utils import to_item, to_numpy, to_targz
+from src.utils import some, to_item, to_numpy, to_targz
 
 __all__ = [
     "Algorithm",
@@ -151,7 +151,7 @@ class Algorithm(pl.LightningModule):
         for pred, chip in zip(preds_np, batch["chip"]):
             im = Image.fromarray(pred)
             assert im.size == (256, 256)
-            assert self.pred_dir is not None
+            assert some(self.pred_dir)
             save_path = self.pred_dir / f"{chip}_agbm.tif"
             im.save(save_path, format="TIFF", save_all=True)
 
@@ -170,15 +170,15 @@ class Algorithm(pl.LightningModule):
         optim.Optimizer,
     ]:
         optimizer_config = DictConfig({"_target_": self.optimizer_cls})
-        if self.optimizer_kwargs is not None:
+        if some(self.optimizer_kwargs):
             optimizer_config.update(self.optimizer_kwargs)
 
         params = filter_params(self.named_parameters(), weight_decay=self.weight_decay)
         optimizer = instantiate(optimizer_config, _partial_=True)(params=params, lr=self.lr)
 
-        if self.scheduler_cls is not None:
+        if some(self.scheduler_cls):
             scheduler_config = DictConfig({"_target_": self.scheduler_cls})
-            if self.scheduler_kwargs is not None:
+            if some(self.scheduler_kwargs):
                 scheduler_config.update(self.scheduler_kwargs)
             scheduler = instantiate(scheduler_config, optimizer=optimizer)
             scheduler_config = {
@@ -205,7 +205,7 @@ class Algorithm(pl.LightningModule):
                 ckpt_path="best" if self.test_on_best else None,
                 datamodule=dm,
             )
-        if self.pred_dir is not None:
+        if some(self.pred_dir):
             self.pred_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Generating predictions and saving them to '{self.pred_dir.resolve()}'.")
             try:

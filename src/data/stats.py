@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 
 from src.data.dataset import MissingValue
-from src.utils import eps
+from src.utils import some, torch_eps
 
 __all__ = [
     "CStatsPair",
@@ -65,14 +65,14 @@ class ChannelStatistics:
 
     @property
     def std(self) -> Tensor:
-        return self.var.clamp_min(eps(self.var)).sqrt()
+        return self.var.clamp_min(torch_eps(self.var)).sqrt()
 
     def update_var(self, batch: Tensor) -> None:
         if self._n is None:
             raise RuntimeError(
                 "Mean must be computed with 'update' before variance can be computed."
             )
-        if (self._n_var is not None) and (self._n_var > self._n).any():
+        if some(self._n_var) and (self._n_var > self._n).any():
             raise RuntimeError(
                 "More samples passed to compute variance than were used to compute the mean."
             )
@@ -88,10 +88,8 @@ class ChannelStatistics:
                 (batch_t_flat.size(1),) * batch_t_flat.size(0), device=batch.device
             )
 
-        new_n = self._n + counts
-
         sq_err = (batch_t_flat - mean).pow(2)
-        if mask is not None:
+        if some(mask):
             sq_err[mask] = 0.0
         batch_var = sq_err.sum(dim=1) / self._n
         if self._var is None:
@@ -99,10 +97,10 @@ class ChannelStatistics:
         else:
             self._var += batch_var
 
-        if self._n_var is None:
-            self._n_var = counts
-        else:
+        if some(self._n_var):
             self._n_var += counts
+        else:
+            self._n_var = counts
 
     def update(self, batch: Tensor) -> None:
         batch_t = batch.movedim(1, 0)
@@ -118,7 +116,7 @@ class ChannelStatistics:
             )
 
         new_n = old_n + counts
-        if mask is not None:
+        if some(mask):
             batch_t_flat[mask] = torch.inf
         batch_min = batch_t_flat.min(dim=1).values
 
@@ -127,7 +125,7 @@ class ChannelStatistics:
         else:
             self._min = self._min.min(batch_min)
 
-        if mask is not None:
+        if some(mask):
             batch_t_flat[mask] = -torch.inf
         batch_max = batch_t_flat.max(dim=1).values
 
@@ -136,7 +134,7 @@ class ChannelStatistics:
         else:
             self._max = self._max.max(batch_max)
 
-        if mask is not None:
+        if some(mask):
             batch_t_flat[mask] = 0.0
         batch_mean = (batch_t_flat / new_n.unsqueeze(1)).sum(dim=1)
         if self._mean is None:

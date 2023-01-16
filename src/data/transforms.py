@@ -25,7 +25,7 @@ import torch.nn as nn
 from typing_extensions import override
 
 from src.types import ImageSample, TrainSample
-from src.utils import eps
+from src.utils import some, torch_eps
 
 __all__ = [
     "AGBMLog1PScale",
@@ -178,7 +178,7 @@ class DropBands(InputTransform):
             return inputs
 
         x = inputs["image"]
-        if self.slice_dim is not None:
+        if some(self.slice_dim):
             slice_dim = self.slice_dim
         elif x.ndim > 3:
             slice_dim = 1
@@ -429,7 +429,7 @@ class _ZScoreNormalize(Normalize):
     def _transform(self, data: Tensor) -> Tensor:
         broadcast_shape = self.broadcast_shape(data)
         data -= self.mean.view(broadcast_shape)
-        data /= self.std.clamp_min(eps(data)).view(broadcast_shape)
+        data /= self.std.clamp_min(torch_eps(data)).view(broadcast_shape)
         return data
 
 
@@ -482,7 +482,7 @@ class _MinMaxNormalize(Normalize):
     def _inverse_transform(self, data: Tensor) -> Tensor:
         broadcast_shape = self.broadcast_shape(data)
         data -= self.new_min.view(broadcast_shape)
-        data /= (self.new_range + eps(data)).view(broadcast_shape)
+        data /= (self.new_range + torch_eps(data)).view(broadcast_shape)
         data *= self.orig_range.view(broadcast_shape)
         data += self.orig_min.view(broadcast_shape)
         return data

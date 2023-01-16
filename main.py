@@ -4,7 +4,7 @@ from ranzen.hydra import Option
 import torch.multiprocessing
 
 from src.algorithms import Erm
-from src.models import Unet3dVdFn, UnetFn, UnetPlusPlusFn
+from src.models import Unet3dVdFn, UnetFn, UnetPlusPlusFn, Unet3dImagenFn
 from src.relay import SentinelRelay
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -25,6 +25,7 @@ if __name__ == "__main__":
     ]
     model_ops = [
         Option(Unet3dVdFn, "unet3d"),
+        Option(Unet3dImagenFn, "unet3d_imagen"),
         Option(UnetFn, "unet"),
         Option(UnetPlusPlusFn, "unetpp"),
     ]

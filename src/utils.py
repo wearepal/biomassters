@@ -1,6 +1,7 @@
 from pathlib import Path
 import tarfile
 from typing import Optional, TypeVar, Union, overload
+from typing_extensions import TypeGuard
 
 import numpy as np
 import numpy.typing as npt
@@ -8,7 +9,21 @@ import torch
 from torch import Tensor
 from torch.types import Number
 
-__all__ = ["to_item", "to_numpy", "eps", "to_targz"]
+__all__ = [
+    "default_if_none",
+    "to_item",
+    "to_numpy",
+    "to_targz",
+    "torch_eps",
+    "some",
+]
+
+
+T = TypeVar("T")
+
+
+def some(value: Optional[T]) -> TypeGuard[T]:
+    return value is not None
 
 
 DT = TypeVar("DT", bound=Union[np.number, np.bool_])
@@ -26,7 +41,7 @@ def to_numpy(tensor: Tensor, *, dtype: None = ...) -> npt.NDArray:
 
 def to_numpy(tensor: Tensor, *, dtype: Optional[DT] = None) -> Union[npt.NDArray[DT], npt.NDArray]:
     arr = tensor.detach().cpu().numpy()
-    if dtype is not None:
+    if some(dtype):
         arr.astype(dtype)
     return arr
 
@@ -35,7 +50,7 @@ def to_item(tensor: Tensor) -> Number:
     return tensor.detach().cpu().item()
 
 
-def eps(data: Tensor) -> float:
+def torch_eps(data: Tensor) -> float:
     return torch.finfo(data.dtype).eps
 
 
@@ -50,3 +65,7 @@ def to_targz(source: Path, *, output: Optional[Path] = None) -> Path:
             for file in source.iterdir():
                 tar.add(file, arcname=file.name)
     return output
+
+
+def default_if_none(value: Optional[T], *, default: T) -> T:
+    return default if value is None else value

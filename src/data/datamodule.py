@@ -14,6 +14,7 @@ from src.data.dataset import SentinelDataset
 from src.data.stats import ChannelStatistics, CStatsPair
 import src.data.transforms as T
 from src.types import LitFalse, LitTrue, TrainSample
+from src.utils import some
 
 __all__ = [
     "SentinelDataModule",
@@ -97,7 +98,7 @@ class SentinelDataModule(pl.LightningDataModule):
     @property
     def train_data(self) -> TrainData:
         self._check_setup_called()
-        assert self._train_data is not None
+        assert some(self._train_data)
         return self._train_data
 
     def in_channels(self, temporal: bool) -> int:
@@ -108,7 +109,7 @@ class SentinelDataModule(pl.LightningDataModule):
     @property
     def val_data(self) -> EvalData:
         self._check_setup_called()
-        assert self._val_data is not None
+        assert some(self._val_data)
         return self._val_data
 
     @property
@@ -123,12 +124,12 @@ class SentinelDataModule(pl.LightningDataModule):
         self,
     ) -> PredData:
         self._check_setup_called()
-        assert self._pred_data is not None
+        assert some(self._pred_data)
         return self._pred_data
 
     @property
     def is_set_up(self) -> bool:
-        return self._train_data is not None
+        return some(self._train_data)
 
     def _check_setup_called(self, caller: Optional[str] = None) -> None:
         if not self.is_set_up:
@@ -251,7 +252,7 @@ class SentinelDataModule(pl.LightningDataModule):
     @train_transforms.setter
     def train_transforms(self, transform: Optional[TrainTransform]) -> None:
         self._train_transforms = transform
-        if self._train_data is not None:
+        if some(self._train_data):
             self._train_data.transform = transform
 
     @property
@@ -265,11 +266,11 @@ class SentinelDataModule(pl.LightningDataModule):
     @eval_transforms.setter
     def eval_transforms(self, transform: EvalTransform) -> None:
         self._eval_transforms = transform
-        if self._test_data is not None:
+        if some(self._test_data):
             self._test_data.transform = transform
-        if self._val_data is not None:
+        if some(self._val_data):
             self._val_data.transform = transform
-        if self._pred_data is not None:
+        if some(self._pred_data):
             self._pred_data.transform = transform
 
     def train_statistics(self, compute_var: bool = True) -> CStatsPair:

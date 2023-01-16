@@ -6,7 +6,11 @@ from torch import Tensor
 import torch.nn as nn
 from typing_extensions import override
 
-__all__ = ["QuantileLoss", "stable_mse_loss"]
+__all__ = [
+    "CharbonnierLoss",
+    "QuantileLoss",
+    "stable_mse_loss",
+]
 
 
 class QuantileLoss(nn.Module):
@@ -47,3 +51,26 @@ def stable_mse_loss(input: Tensor, *, target: Tensor, samplewise: bool = False) 
     reduction_dim = 1 if samplewise else 0
     diff = diff.flatten(start_dim=reduction_dim)
     return ((diff / diff.size(reduction_dim)) * diff).sum(reduction_dim)
+
+
+class CharbonnierLoss(nn.Module):
+    """
+    The Charbonnier loss, also known as the pseudo Huber loss, or L1-L2 loss.
+    """
+
+    def __init__(
+        self,
+        alpha: float = 1,
+        *,
+        eps: float = 1.0e-5,
+        reduction: ReductionType = ReductionType.mean,
+    ) -> None:
+        super().__init__()
+        self.eps_sq = eps**2
+        self.exponent = alpha / 2.0
+        self.reduction = reduction
+
+    @override
+    def forward(self, input: Tensor, *, target: Tensor) -> Tensor:
+        losses = ((input - target).pow(2) + self.eps_sq).pow(self.exponent)
+        return reduce(losses=losses, reduction_type=self.reduction)

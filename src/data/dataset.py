@@ -36,6 +36,7 @@ from typing_extensions import Self, TypeAlias
 from src.data.transforms import InputTransform, TargetTransform
 from src.logging import tqdm_joblib
 from src.types import LitFalse, LitTrue, TestSample, TrainSample
+from src.utils import default_if_none, some
 
 warnings.filterwarnings("ignore", category=rasterio.errors.NotGeoreferencedWarning)
 
@@ -241,13 +242,14 @@ class SentinelDataset(Dataset, Generic[TR, P]):
 
     @property
     def tile_file(self) -> Optional[Path]:
-        return None if self.tile_dir is None else (self.tile_dir / self.split).with_suffix(".csv")
+        if some(self.tile_dir):
+            return (self.tile_dir / self.split).with_suffix(".csv")
 
     @property
     @lru_cache(maxsize=16)
     def preprocessed_dir(self: "SentinelDataset[TR, LitTrue]") -> Path:
         pp_dir_stem = f"group_by={self.group_by.name}_missing_value={self.missing_value.name}_precision={self.save_precision.name}"
-        if self.tile_file is not None:
+        if some(self.tile_file):
             tf_stem = self.tile_file.stem
             pp_dir_stem += f"_tile_file={tf_stem}"
         subroot_dir = f"preprocessed_{self.save_with.value}"
@@ -382,7 +384,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         ...
 
     def _load_agbm_tile(self: "SentinelDataset", chip: int) -> Optional[Tensor]:
-        if self.target_dir is not None:
+        if some(self.target_dir):
             target_path = self.target_dir / f"{chip}_agbm.tif"
             return self._read_tif_to_tensor(target_path)
 
@@ -496,7 +498,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             sample = self._load_preprocessed(index)
         else:
             sample = self._load_unprocessed(index)
-        if self.transform is not None:
+        if some(self.transform):
             sample = self.transform(sample)
         return sample
 
@@ -514,7 +516,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         subset = gcopy(self, deep=deep)
         subset.indices = subset.indices[indices]
         subset.chip = subset.chip[indices]
-        if subset.month is not None:
+        if some(subset.month):
             subset.month = subset.month[indices]
         subset.metadata = subset.metadata.iloc[indices]
 
