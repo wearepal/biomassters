@@ -16,6 +16,8 @@ from typing import (
     runtime_checkable,
 )
 
+import kornia.augmentation as K
+from kornia.constants import Resample
 from ranzen import gcopy
 import torch
 from torch import Tensor
@@ -32,6 +34,7 @@ __all__ = [
     "ApplyToTimeSlice",
     "ClampInput",
     "ClampTarget",
+    "ColorJiggle",
     "Compose",
     "DenormalizeModule",
     "DropBands",
@@ -43,6 +46,7 @@ __all__ = [
     "NanToNum",
     "Permute",
     "RandomHorizontalFlip",
+    "RandomResizedCrop",
     "RandomRotation",
     "RandomVerticalFlip",
     "Sentinel1Scaler",
@@ -98,6 +102,49 @@ class Compose(Generic[T]):
     def __call__(self, inputs):
         for transform in self.transforms:
             inputs = transform(inputs)  # type: ignore
+        return inputs
+
+    def __getitem__(self, index: int) -> T:
+        return self.transforms[index]
+
+    def __repr__(self) -> str:
+        format_string = self.__class__.__name__ + "("
+        for t in self.transforms:
+            format_string += "\n"
+            format_string += f"    {t}"
+        format_string += "\n)"
+        return format_string
+
+
+def should_apply(p: float) -> bool:
+    if p >= 1.0:
+        return True
+    elif p <= 0.0:
+        return False
+    return random.random() < p
+
+
+class OneOf(Generic[T]):
+    def __init__(self, transforms: Sequence[T], *, p: float = 1.0) -> None:
+        self.transforms = transforms
+        self.p = p
+
+    @overload
+    def __call__(self: "Compose[InputTransform]", inputs: S) -> S:
+        ...
+
+    @overload
+    def __call__(self: "Compose[TargetTransform]", inputs: TrainSample) -> TrainSample:
+        ...
+
+    @overload
+    def __call__(self: "Compose[T]", inputs: Union[S, TrainSample]) -> Union[S, TrainSample]:
+        ...
+
+    def __call__(self, inputs):
+        if should_apply(self.p):
+            transform = random.choice(self.transforms)
+            inputs = transform(inputs)
         return inputs
 
     def __getitem__(self, index: int) -> T:
@@ -227,13 +274,13 @@ class Sentinel1Scaler(InputTransform):
         self.inplace = inplace
 
     @override
-    def __call__(self, sample: S) -> S:
+    def __call__(self, inputs: S) -> S:
         if not self.inplace:
-            sample["image"] = sample["image"].clone()
-        sample["image"] = scale_sentinel1_data_(
-            sample["image"], start_index=self.start_index, end_index=self.end_index
+            inputs["image"] = inputs["image"].clone()
+        inputs["image"] = scale_sentinel1_data_(
+            inputs["image"], start_index=self.start_index, end_index=self.end_index
         )
-        return sample
+        return inputs
 
 
 # True scaling is [0, 10000], most info is in [0, 4000] range
@@ -574,7 +621,7 @@ class RandomHorizontalFlip(TargetTransform):
 
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
-        if random.random() < self.p:
+        if should_apply(self.p):
             inputs["image"] = torch.flip(inputs["image"], dims=self.DIMS)
             inputs["label"] = torch.flip(inputs["label"], dims=self.DIMS)
         return inputs
@@ -588,7 +635,7 @@ class RandomVerticalFlip(TargetTransform):
 
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
-        if random.random() < self.p:
+        if should_apply(self.p):
             inputs["image"] = torch.flip(inputs["image"], dims=self.DIMS)
             inputs["label"] = torch.flip(inputs["label"], dims=self.DIMS)
         return inputs
@@ -602,6 +649,87 @@ class RandomRotation(TargetTransform):
     def __call__(self, inputs: TrainSample) -> TrainSample:
         if random.random() < self.p:
             k = random.randint(1, 3)
-            inputs["image"] = torch.rot90(inputs["image"], k=k)
-            inputs["label"] = torch.rot90(inputs["label"], k=k)
+            inputs["image"] = torch.rot90(inputs["image"], k=k, dims=(-2, -1))
+            inputs["label"] = torch.rot90(inputs["label"], k=k, dims=(-2, -1))
+        return inputs
+
+
+def _apply_along_time_axis(x: Tensor, *, fn: K.AugmentationBase2D) -> Tensor:
+    return fn(x.transpose(0, 1)).transpose(0, 1)
+
+
+class ColorJiggle(InputTransform):
+    def __init__(
+        self,
+        *,
+        brightness: Union[float, Tuple[float, float], List[float]] = 0.0,
+        contrast: Union[float, Tuple[float, float], List[float]] = 0.0,
+        saturation: Union[float, Tuple[float, float], List[float]] = 0.0,
+        hue: Union[float, Tuple[float, float], List[float]] = 0.0,
+        same_on_batch: bool = False,
+        rgb_dims: Tuple[int, int, int] = (0, 1, 2),
+        p: float = 1.0,
+        inplace: bool = True,
+    ) -> None:
+        self.p = p
+        self.rgb_dims = rgb_dims
+        self.inplace = inplace
+        self.fn = K.ColorJiggle(
+            brightness=brightness,
+            contrast=contrast,
+            saturation=saturation,
+            hue=hue,
+            same_on_batch=same_on_batch,
+        )
+
+    @override
+    def __call__(self, inputs: S) -> S:
+        K.ColorJiggle
+        # inputs are assumed to be in CFHW format (no batch dim)
+        if not self.inplace:
+            inputs["image"] = inputs["image"].clone()
+        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W) --
+        # we treat the frame (F) dim as the batch dim, tranposing it to the 0th
+        # dimension and then reversing the tranposition after the transform has
+        # been applied.
+        transformed = _apply_along_time_axis(x=inputs["image"][self.rgb_dims], fn=self.fn)
+        inputs["image"][self.rgb_dims] = transformed
+        return inputs
+
+
+class RandomResizedCrop(TargetTransform):
+    def __init__(
+        self,
+        *,
+        size: Tuple[int, int],
+        scale: Tuple[float, float] = (0.08, 1.0),
+        ratio: Tuple[float, float] = (3.0 / 4.0, 4.0 / 3.0),
+        resample: Resample = Resample.BICUBIC,
+        align_corners: bool = True,
+        p: float = 1.0,
+        cropping_mode: str = "slice",
+    ) -> None:
+        self.p = p
+        self.fn = K.RandomResizedCrop(
+            size=size,
+            scale=scale,
+            ratio=ratio,
+            resample=resample,
+            same_on_batch=True,
+            align_corners=align_corners,
+            p=1.0,
+            cropping_mode=cropping_mode,
+            return_transform=False,
+        )
+
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        if should_apply(self.p):
+            # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
+            # -- we treat the frame (F) dim as the batch dim, tranposing it to
+            # the 0th (batch) dimension and then reversing the tranposition
+            # after the transform has been applied.
+            inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
+            transform_matrix = self.fn.transform_matrix[0]
+            inputs["label"] = self.fn(inputs["label"], transform_matrix=transform_matrix)
         return inputs
