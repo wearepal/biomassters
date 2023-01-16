@@ -10,7 +10,7 @@ defaults:
 
 
 alg:
-  pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/${NOW}
+  pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/${EPOCHSECONDS}
   lr: 1e-4
   weight_decay: 1.e-4
   lr_sched_freq: 1
