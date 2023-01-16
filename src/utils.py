@@ -1,16 +1,14 @@
+from pathlib import Path
+import tarfile
 from typing import Optional, TypeVar, Union, overload
-import torch
 
 import numpy as np
 import numpy.typing as npt
+import torch
 from torch import Tensor
 from torch.types import Number
 
-__all__ = [
-    "to_item",
-    "to_numpy",
-    "eps",
-]
+__all__ = ["to_item", "to_numpy", "eps", "to_targz"]
 
 
 DT = TypeVar("DT", bound=Union[np.number, np.bool_])
@@ -39,3 +37,16 @@ def to_item(tensor: Tensor) -> Number:
 
 def eps(data: Tensor) -> float:
     return torch.finfo(data.dtype).eps
+
+
+def to_targz(source: Path, *, output: Optional[Path] = None) -> Path:
+    output = source if output is None else output
+    if output.suffixes[-2:] != [".tar", ".gz"]:
+        output = output.with_suffix(".tar.gz")
+
+    if not output.exists():
+        output.parent.mkdir(exist_ok=True, parents=True)
+        with tarfile.open(output, "w:gz") as tar:
+            for file in source.iterdir():
+                tar.add(file, arcname=file.name)
+    return output

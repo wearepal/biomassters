@@ -20,7 +20,7 @@ from typing_extensions import Self, TypeAlias, override
 from src.data import SentinelDataModule, SentinelDataset
 from src.loss import stable_mse_loss
 from src.types import TestSample, TrainSample
-from src.utils import to_item, to_numpy
+from src.utils import to_item, to_numpy, to_targz
 
 __all__ = [
     "Algorithm",
@@ -69,6 +69,7 @@ class Algorithm(pl.LightningModule):
         test_on_best: bool = False,
         predict_with_best: bool = True,
         ckpt_path: Optional[Path] = None,
+        pred_dir: Optional[Path] = None,
     ) -> None:
         super().__init__()
         self.lr = lr
@@ -80,7 +81,7 @@ class Algorithm(pl.LightningModule):
         self.lr_sched_freq = lr_sched_freq
         self.test_on_best = test_on_best
         self.predict_with_best = predict_with_best
-        self.pred_dir: Optional[Path] = None
+        self.pred_dir = pred_dir
         self.ckpt_path = ckpt_path if ckpt_path is None else str(ckpt_path.resolve())
 
     def training_step(
@@ -215,12 +216,15 @@ class Algorithm(pl.LightningModule):
             # will result in an error
             except ValueError:
                 trainer.predict(model=self, datamodule=dm)
+            # Tar pred_dir so that it's in a submission-ready state.
+            logger.info("Archiving the generated predictions so they're ready-for-submission.")
+            output_path = to_targz(source=self.pred_dir)
+            logger.info(f"Predictions archived to {output_path.resolve()}")
 
         return self
 
-    def _setup(self, *, dm: SentinelDataModule, model: nn.Module, pred_dir: Optional[Path]) -> None:
+    def _setup(self, *, dm: SentinelDataModule, model: nn.Module) -> None:
         self.model = model
-        self.pred_dir = pred_dir
 
     @final
     def run(
@@ -230,7 +234,6 @@ class Algorithm(pl.LightningModule):
         model: nn.Module,
         trainer: pl.Trainer,
         test: bool = True,
-        pred_dir: Optional[Path] = None,
     ) -> Self:
-        self._setup(dm=dm, model=model, pred_dir=pred_dir)
+        self._setup(dm=dm, model=model)
         return self._run_internal(dm=dm, trainer=trainer, test=test)

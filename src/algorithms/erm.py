@@ -33,6 +33,7 @@ class Erm(Algorithm):
         test_on_best: bool = False,
         loss_fn: Optional[_Loss] = None,
         ckpt_path: Optional[Path] = None,
+        pred_dir: Optional[Path] = None,
     ) -> None:
         super().__init__(
             lr=lr,
@@ -44,6 +45,7 @@ class Erm(Algorithm):
             lr_sched_freq=lr_sched_freq,
             test_on_best=test_on_best,
             ckpt_path=ckpt_path,
+            pred_dir=pred_dir,
         )
         self._loss_fn = loss_fn
 

@@ -3,7 +3,7 @@ defaults:
   - /schema/checkpointer: base
   - _self_
 monitor: 'validate/RMSE'
-dirpath: /srv/galene0/shared/models/biomassters/
+dirpath: /srv/galene0/shared/models/biomassters/{NOW}
 save_last: true
 mode: 'min'
 save_top_k: 1

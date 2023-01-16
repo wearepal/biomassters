@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import datetime
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -36,7 +35,6 @@ class SentinelRelay(Relay):
     score: bool = False
     seed: Optional[int] = 0
     progbar_theme: CdtProgressBar.Theme = CdtProgressBar.Theme.CYBERPUNK
-    pred_dir: Optional[Path] = None
 
     @classmethod
     @override
@@ -84,18 +82,8 @@ class SentinelRelay(Relay):
                 dict_conf["_target_"].split(".")[-1].lower() for dict_conf in (self.model, self.alg)
             )
             self.logger["group"] = default_group
-        logger: WandbLogger = instantiate(self.logger, reinit=True)
 
-        # Augment the save paths with a timestamp/wandb name for uniqueness
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        pred_dir_full = None
-        if self.pred_dir is not None:
-            pred_dir_full = self.pred_dir / timestamp
-            raw_config["path_to_predictions"] = str(pred_dir_full.resolve())
-        ckpt_dir_path_full = Path(str(self.checkpointer["dirpath"])) / timestamp
-        self.checkpointer["dirpath"] = ckpt_dir_path_full
-        raw_config["checkpointer"]["dirpath"] = str(ckpt_dir_path_full.resolve())
-
+        logger: WandbLogger = instantiate(self.logger, reinit=False)
         logger.log_hyperparams(raw_config)  # type: ignore
         progbar = CdtProgressBar(theme=self.progbar_theme)
         checkpointer: ModelCheckpoint = instantiate(self.checkpointer)
@@ -108,7 +96,7 @@ class SentinelRelay(Relay):
             callbacks=trainer_callbacks,
         )
         alg: Algorithm = instantiate(self.alg)
-        alg.run(dm=dm, model=model, trainer=trainer, pred_dir=pred_dir_full)
+        alg.run(dm=dm, model=model, trainer=trainer)
 
         if self.score:
             loguru.logger.info("Scoring model.")
