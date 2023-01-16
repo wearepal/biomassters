@@ -46,8 +46,16 @@ train_transforms:
       posinf: 0.0
       neginf: 0.0
 
+    # - _target_: src.data.transforms.RandomResizedCrop
+    #   p: 1.0
+    #   size: [256, 256]
+    #   scale: [0.4, 0.1]
+
     - _target_: src.data.transforms.RandomHorizontalFlip
       p: 0.5
+
+    - _target_: src.data.transforms.RandomRotation
+      p: 0.75
 
     - _target_: src.data.transforms.ZScoreNormalizeTarget
       mean: 63.3297

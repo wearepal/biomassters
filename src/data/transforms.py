@@ -44,6 +44,7 @@ __all__ = [
     "MinMaxNormalizeTarget",
     "MoveDim",
     "NanToNum",
+    "OneOf",
     "Permute",
     "RandomHorizontalFlip",
     "RandomResizedCrop",
@@ -614,7 +615,7 @@ class ClampInput(InputTransform):
 
 
 class RandomHorizontalFlip(TargetTransform):
-    DIMS = (-1,)
+    DIMS: ClassVar[Tuple[int]] = (-1,)
 
     def __init__(self, p: float = 0.5) -> None:
         self.p = p
@@ -628,7 +629,7 @@ class RandomHorizontalFlip(TargetTransform):
 
 
 class RandomVerticalFlip(TargetTransform):
-    DIMS = (-2,)
+    DIMS: ClassVar[Tuple[int]] = (-2,)
 
     def __init__(self, p: float = 0.5) -> None:
         self.p = p
@@ -642,6 +643,8 @@ class RandomVerticalFlip(TargetTransform):
 
 
 class RandomRotation(TargetTransform):
+    DIMS: ClassVar[Tuple[int, int]] = (-2, -1)
+
     def __init__(self, p: float = 0.5) -> None:
         self.p = p
 
@@ -649,8 +652,8 @@ class RandomRotation(TargetTransform):
     def __call__(self, inputs: TrainSample) -> TrainSample:
         if random.random() < self.p:
             k = random.randint(1, 3)
-            inputs["image"] = torch.rot90(inputs["image"], k=k, dims=(-2, -1))
-            inputs["label"] = torch.rot90(inputs["label"], k=k, dims=(-2, -1))
+            inputs["image"] = torch.rot90(inputs["image"], k=k, dims=self.DIMS)
+            inputs["label"] = torch.rot90(inputs["label"], k=k, dims=self.DIMS)
         return inputs
 
 
@@ -684,7 +687,6 @@ class ColorJiggle(InputTransform):
 
     @override
     def __call__(self, inputs: S) -> S:
-        K.ColorJiggle
         # inputs are assumed to be in CFHW format (no batch dim)
         if not self.inplace:
             inputs["image"] = inputs["image"].clone()
