@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from src.utils import some
 
-from .common import ChanLayerNorm, GlobalContextAttention, Residual
+from .common import ChanLayerNorm, EtaPool, GlobalContextAttention, Residual
 
 __all__ = ["Unet3dVd"]
 
@@ -343,7 +343,8 @@ class EncoderStage(nn.Module):
                 ),
             )
         )
-        self.pool = nn.AdaptiveMaxPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+        # self.temporal_pool = nn.AdaptiveMaxPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+        self.temporal_pool = EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity()
         self.downsample = down_conv(dim_out) if downsample else nn.Identity()
 
     @override
@@ -352,7 +353,7 @@ class EncoderStage(nn.Module):
         x = self.rn_block2(x)
         x = self.spatial_attn(x)
         x = self.temporal_attn(x, pos_bias=pos_bias)
-        shortcut = self.pool(x)
+        shortcut = self.temporal_pool(x)
         return self.downsample(x), shortcut
 
 
@@ -468,14 +469,15 @@ class MiddleStage(nn.Module):
             groups=groups,
             use_gca=use_gca,
         )
-        self.pool = nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+        # self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+        self.temporal_pool = EtaPool(dim, kernel_size=3) if temporal_pooling else nn.Identity()
 
     @override
     def forward(self, x: Tensor, *, pos_bias: Tensor) -> Tensor:
         x = self.mid_block1(x)
         x = self.mid_spatial_attn(x)
         x = self.mid_temporal_attn(x, pos_bias=pos_bias)
-        x = self.pool(x)
+        x = self.temporal_pool(x)
         return x
 
 
@@ -599,7 +601,8 @@ class Unet3dVd(nn.Module):
                 )
             )
 
-        self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
+        # self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
+        self.temporal_pool = EtaPool(dim * 2, kernel_size=3)
         # Final (2d) conv block operating on temporally-pooled features
         self.final_conv = nn.Sequential(
             ResnetBlock3d(in_dim=dim * 2, out_dim=dim, groups=resnet_groups, use_gca=True),

@@ -15,6 +15,7 @@ from src.utils import some, unwrap_or
 from .common import (
     AxialConv3d,
     ChanLayerNorm,
+    EtaPool,
     GlobalContextAttention,
     LayerNorm,
     Residual,
@@ -770,8 +771,9 @@ class Unet3DImagen(nn.Module):
             dim if init_conv_to_final_conv_residual else 0
         )
 
-        # Poolign over the time axis.
-        self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
+        # Pooling over the time axis.
+        # self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
+        self.temporal_pool = EtaPool(final_conv_dim, kernel_size=3)
         # final optional resnet block and convolution out
         self.final_res_block = (
             FinalResnetBlock(

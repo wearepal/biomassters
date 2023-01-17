@@ -1,6 +1,6 @@
-from typing import Any, List, Optional, Tuple, TypeVar, Union
+from typing import Any, List, Literal, Optional, Tuple, TypeVar, Union
 
-from einops import rearrange  # type: ignore
+from einops import rearrange, reduce  # type: ignore
 from einops_exts import rearrange_many  # type: ignore
 import torch
 from torch import Tensor, einsum, nn
@@ -10,8 +10,9 @@ from src.utils import default_if_none, some
 
 __all__ = [
     "AxialConv3d",
-    "GlobalContextAttention",
     "ChanLayerNorm",
+    "EtaPool",
+    "GlobalContextAttention",
     "LayerNorm",
     "Residual",
     "cast_tuple",
@@ -196,3 +197,33 @@ class AxialConv3d(nn.Module):
         x = rearrange(x, "(b h w) c f -> b c f h w", h=h, w=w)
 
         return x
+
+
+class EtaPool(nn.Module):
+    """
+    Efficient-temporal-attention pooling.
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        *,
+        kernel_size: int = 1,
+        attn_fn: Literal["softmax", "sigmoid"] = "softmax",
+    ) -> None:
+        super().__init__()
+        self.net = nn.Conv1d(
+            in_channels=in_dim,
+            out_channels=1,
+            kernel_size=kernel_size,
+            padding="same",
+            bias=False,
+        )
+        self.attn_fn = nn.Softmax(-1) if attn_fn == "softmax" else nn.Sigmoid()
+
+    @override
+    def forward(self, x: Tensor) -> Tensor:
+        spatial_descriptors = reduce(x, "b c f h w -> b c f", reduction="mean")
+        attn = self.attn_fn(self.net(spatial_descriptors))
+        attn = rearrange(attn, "b 1 f -> b 1 f 1 1")
+        return reduce(attn * x, "b c f h w -> b c 1 h w", reduction="mean")
