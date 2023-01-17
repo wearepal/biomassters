@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from src.utils import some
 
-from .common import GlobalContextAttention, LayerNorm, Residual
+from .common import GlobalContextAttention, ChanLayerNorm, Residual
 
 __all__ = ["Unet3dVd"]
 
@@ -102,7 +102,7 @@ class PreNorm(nn.Module):
     def __init__(self, dim: int, *, fn: nn.Module):
         super().__init__()
         self.fn = fn
-        self.norm = LayerNorm(dim)
+        self.norm = ChanLayerNorm(dim)
 
     @override
     def forward(self, x: Tensor, **kwargs: Any):

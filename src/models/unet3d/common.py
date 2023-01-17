@@ -1,9 +1,10 @@
-from typing import Any, Optional, Tuple, TypeVar, Union, List
+from typing import Any, List, Optional, Tuple, TypeVar, Union
 
 from einops import rearrange  # type: ignore
 from einops_exts import rearrange_many  # type: ignore
 import torch
 from torch import Tensor, einsum, nn
+import torch.nn.functional as F
 from typing_extensions import override
 
 from src.utils import default_if_none, some
@@ -11,11 +12,30 @@ from src.utils import default_if_none, some
 __all__ = [
     "AxialConv3d",
     "GlobalContextAttention",
+    "ChanLayerNorm",
     "LayerNorm",
     "Residual",
     "cast_tuple",
     "pseudo_conv2d",
 ]
+
+
+class ChanLayerNorm(nn.Module):
+    def __init__(
+        self, dim: int, *, eps=1e-5, stable: bool = False, init_zero: bool = False
+    ) -> None:
+        super().__init__()
+        self.eps = eps
+        self.gamma = nn.Parameter(torch.zeros(dim) if init_zero else torch.ones(dim))
+        self.stable = stable
+
+    @override
+    def forward(self, x: Tensor) -> Tensor:
+        if self.stable:
+            x = x / x.amax(dim=1, keepdim=True).detach()
+        var, mean = torch.var_mean(x, dim=1, unbiased=False, keepdim=True)
+        gamma = self.gamma.view(1, -1, *((1,) * (x.ndim - 2)))
+        return (x - mean) * (var + self.eps).rsqrt() * gamma
 
 
 class LayerNorm(nn.Module):
@@ -24,9 +44,7 @@ class LayerNorm(nn.Module):
     ) -> None:
         super().__init__()
         self.eps = eps
-        self.gamma = nn.Parameter(
-            torch.zeros(1, dim, 1, 1, 1) if init_zero else torch.ones(1, dim, 1, 1, 1)
-        )
+        self.gamma = nn.Parameter(torch.zeros(dim) if init_zero else torch.ones(dim))
         self.stable = stable
 
     @override
@@ -40,7 +58,9 @@ class LayerNorm(nn.Module):
 V = TypeVar("V")
 
 
-def cast_tuple(val: Union[V, Tuple[V, ...], List[V]], *, length: Optional[int] = None) -> Tuple[V, ...]:
+def cast_tuple(
+    val: Union[V, Tuple[V, ...], List[V]], *, length: Optional[int] = None
+) -> Tuple[V, ...]:
     if isinstance(val, list):
         val = tuple(val)
 
@@ -143,28 +163,35 @@ class AxialConv3d(nn.Module):
             in_channels,
             out_channels,
             kernel_size=kernel_size,
-            padding=default_if_none(padding, default=kernel_size // 2),
+            padding=default_if_none(padding, default="same"),
         )
         if kernel_size > 1:
             self.temporal_conv = nn.Conv1d(
-                out_channels, out_channels, kernel_size=temporal_kernel_size
+                out_channels,
+                out_channels=out_channels,
+                kernel_size=temporal_kernel_size,
+                padding="same",
             )
             nn.init.dirac_(self.temporal_conv.weight.data)  # initialized to be identity
             if some(self.temporal_conv.bias):
                 nn.init.zeros_(self.temporal_conv.bias.data)
         else:
-            self.temporal_conv = nn.Identity()
+            self.temporal_conv = None
         self.kernel_size = kernel_size
 
     @override
     def forward(self, x: Tensor) -> Tensor:
-        b, _, *_, h, w = x.shape
+        b, _, _, h, w = x.shape
         x = rearrange(x, "b c f h w -> (b f) c h w")
         x = self.spatial_conv(x)
         x = rearrange(x, "(b f) c h w -> b c f h w", b=b)
+        x = x
+
+        if self.temporal_conv is None:
+            return x
+
         x = rearrange(x, "b c f h w -> (b h w) c f")
         x = self.temporal_conv(x)
-
         x = rearrange(x, "(b h w) c f -> b c f h w", h=h, w=w)
 
         return x

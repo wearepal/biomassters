@@ -14,6 +14,7 @@ from src.utils import default_if_none, some
 
 from .common import (
     AxialConv3d,
+    ChanLayerNorm,
     GlobalContextAttention,
     LayerNorm,
     Residual,
@@ -55,11 +56,9 @@ class LearnedSinusoidalPosEmb(nn.Module):
 
 
 class DynamicPositionBias(nn.Module):
-
     def __init__(self, dim: int, *, heads: int, depth: int) -> None:
         super().__init__()
-        self.mlp = nn.Sequential()
-        self.mlp.append(nn.Sequential(nn.Linear(1, dim), LayerNorm(dim), nn.SiLU()))
+        self.mlp = nn.Sequential(nn.Sequential(nn.Linear(1, dim), LayerNorm(dim), nn.SiLU()))
         for _ in range(max(depth - 1, 0)):
             self.mlp.append(nn.Sequential(nn.Linear(dim, dim), LayerNorm(dim), nn.SiLU()))
         self.mlp.append(nn.Linear(dim, heads))
@@ -75,7 +74,6 @@ class DynamicPositionBias(nn.Module):
         pos = torch.arange(-n + 1, n, device=device, dtype=dtype)
         pos = rearrange(pos, "... -> ... 1")
         pos = self.mlp(pos)
-
         bias = pos[indices]
         bias = rearrange(bias, "i j h -> h i j")
         return bias
@@ -96,18 +94,18 @@ def pseudo_conv2d_block(dim: int, *, mult: int = 2):
     # in paper, it seems for self attention layers they did feedforwards with twice channel width
     hidden_dim = dim * mult
     return nn.Sequential(
-        LayerNorm(dim),
+        ChanLayerNorm(dim),
         pseudo_conv2d(in_channels=dim, out_channels=hidden_dim, kernel_size=1, bias=False),
         nn.GELU(),
-        LayerNorm(hidden_dim),
+        ChanLayerNorm(hidden_dim),
         pseudo_conv2d(in_channels=hidden_dim, out_channels=dim, kernel_size=1, bias=False),
     )
 
 
 class Block3d(nn.Module):
-    def __init__(self, in_dim: int, *, out_dim: int, groups: int = 8) -> None:
+    def __init__(self, in_dim: int, *, out_dim: int, groups: int = 8, norm: bool = True) -> None:
         super().__init__()
-        self.norm = nn.GroupNorm(groups, num_channels=out_dim)
+        self.norm = nn.GroupNorm(groups, num_channels=in_dim) if norm else nn.Identity()
         self.act = nn.SiLU()
         self.proj = AxialConv3d(in_dim, out_channels=out_dim, kernel_size=3, padding=1)
 
@@ -126,7 +124,7 @@ class ResnetBlock3d(nn.Module):
         self.block1 = Block3d(in_dim, out_dim=out_dim, groups=groups)
         self.block2 = Block3d(out_dim, out_dim=out_dim, groups=groups)
         self.res_conv = (
-            nn.Conv3d(in_dim, out_channels=out_dim, kernel_size=1)
+            pseudo_conv2d(in_dim, out_channels=out_dim, kernel_size=1)
             if in_dim != out_dim
             else nn.Identity()
         )
@@ -242,9 +240,11 @@ class Attention(nn.Module):
         super().__init__()
         self.heads = heads
         hidden_dim = dim_head * heads
+        self.norm = LayerNorm(dim)
         self.to_qkv = nn.Linear(dim, hidden_dim * 3, bias=False)
+
         self.to_out = nn.Sequential(
-            nn.Linear(dim, out_features=dim, bias=False), LayerNorm(dim, init_zero=init_zero)
+            nn.Linear(hidden_dim, out_features=dim, bias=False), LayerNorm(dim, init_zero=init_zero)
         )
         self.cosine_sim_attn = cosine_sim_attn
         self.scale = 1 if self.cosine_sim_attn else dim_head**-0.5
@@ -257,6 +257,7 @@ class Attention(nn.Module):
         *,
         pos_bias: Optional[Tensor] = None,
     ) -> Tensor:
+        x = self.norm(x)
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         # split out heads
         q, k, v = rearrange_many(qkv, "... n (h d) -> ... h n d", h=self.heads)
@@ -296,7 +297,7 @@ class LinearAttention(nn.Module):
         self.scale = dim_head**-0.5
         self.heads = heads
         inner_dim = dim_head * heads
-        self.norm = LayerNorm(dim)
+        self.norm = ChanLayerNorm(dim)
 
         self.nonlin = nn.SiLU()
 
@@ -320,7 +321,7 @@ class LinearAttention(nn.Module):
 
         self.to_out = nn.Sequential(
             pseudo_conv2d(inner_dim, out_channels=dim, kernel_size=1, bias=False),
-            LayerNorm(dim),
+            ChanLayerNorm(dim),
         )
 
     @override
@@ -542,7 +543,7 @@ class Unet3DImagen(nn.Module):
 
         # initial convolution
 
-        self.init_conv = AxialConv3d(
+        self.init_conv = pseudo_conv2d(
             in_channels=init_channels,
             out_channels=init_dim,
             kernel_size=init_kernel_size,
@@ -725,7 +726,7 @@ class Unet3DImagen(nn.Module):
                 nn.ModuleList(
                     [
                         ResnetBlock3d(
-                            dim_out + skip_connect_dim,
+                            in_dim=dim_out + skip_connect_dim,
                             out_dim=dim_out,
                             groups=resnet_groups,
                         ),
@@ -795,7 +796,6 @@ class Unet3DImagen(nn.Module):
         if some(self.final_conv.bias):
             nn.init.zeros_(self.final_conv.bias)
 
-
     def _add_skip_connection(self, x: Tensor, *, hiddens: List[Tensor]) -> Tensor:
         return torch.cat((x, hiddens.pop() * self.skip_connect_scale), dim=1)
 
@@ -814,7 +814,7 @@ class Unet3DImagen(nn.Module):
         time_attn_bias = self.time_rel_pos_bias.forward(frames, device=device, dtype=dtype)
         x = self.init_conv(x)
         x = self.init_temporal_peg(x)
-        x = self.init_temporal_attn(x, attn_bias=time_attn_bias)
+        x = self.init_temporal_attn(x, pos_bias=time_attn_bias)
 
         # init conv residual
         if self.init_conv_to_final_conv_residual:
@@ -847,7 +847,7 @@ class Unet3DImagen(nn.Module):
 
             x = attn_block(x)
             x = temporal_peg(x)
-            x = temporal_attn(x, attn_bias=time_attn_bias)
+            x = temporal_attn(x, pos_bias=time_attn_bias)
             hiddens.append(x)
             x = post_downsample(x)
 
@@ -856,7 +856,7 @@ class Unet3DImagen(nn.Module):
         x = self.mid_attn(x)
 
         x = self.mid_temporal_peg(x)
-        x = self.mid_temporal_attn(x, attn_bias=time_attn_bias)
+        x = self.mid_temporal_attn(x, pos_bias=time_attn_bias)
 
         x = self.mid_block2(x)
 
@@ -879,7 +879,7 @@ class Unet3DImagen(nn.Module):
 
             x = attn_block(x)
             x = temporal_peg(x)
-            x = temporal_attn(x, attn_bias=time_attn_bias)
+            x = temporal_attn(x, pos_bias=time_attn_bias)
 
             enc_hiddens.append(x.contiguous())
             x = upsample(x)
