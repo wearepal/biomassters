@@ -10,7 +10,7 @@ from torch import Tensor, einsum, nn
 import torch.nn.functional as F
 from typing_extensions import override
 
-from src.utils import default_if_none, some
+from src.utils import some, unwrap_or
 
 from .common import (
     AxialConv3d,
@@ -171,7 +171,7 @@ class FinalResnetBlock(nn.Module):
 
 
 def downsample(in_dim: int, *, out_dim: Optional[int] = None) -> nn.Sequential:
-    out_dim = default_if_none(out_dim, default=in_dim)
+    out_dim = unwrap_or(out_dim, default=in_dim)
     return nn.Sequential(
         Rearrange("b c f (h p1) (w p2) -> b (c p1 p2) f h w", p1=2, p2=2),
         pseudo_conv2d(in_channels=in_dim * 4, out_channels=out_dim, kernel_size=1),
@@ -190,7 +190,7 @@ class Pad(nn.Module):
 
 
 def upsample(in_dim: int, *, out_dim: Optional[int] = None) -> nn.Sequential:
-    out_dim = default_if_none(out_dim, default=in_dim)
+    out_dim = unwrap_or(out_dim, default=in_dim)
 
     return nn.Sequential(
         nn.Upsample(scale_factor=2, mode="nearest"),
@@ -201,7 +201,7 @@ def upsample(in_dim: int, *, out_dim: Optional[int] = None) -> nn.Sequential:
 class PixelShuffleUpsample(nn.Module):
     def __init__(self, in_dim: int, *, out_dim: Optional[int] = None) -> None:
         super().__init__()
-        out_dim = default_if_none(out_dim, default=in_dim)
+        out_dim = unwrap_or(out_dim, default=in_dim)
         conv = pseudo_conv2d(in_dim, out_channels=out_dim * 4, kernel_size=1)
 
         self.net = nn.Sequential(conv, nn.SiLU())
@@ -473,7 +473,7 @@ class UpsampleCombiner(nn.Module):
     def forward(self, x: Tensor, *, fmaps: Optional[Sequence[Tensor]] = None) -> Tensor:
         target_size = x.shape[-1]
 
-        fmaps = default_if_none(fmaps, default=())
+        fmaps = unwrap_or(fmaps, default=())
 
         if not self.enabled or len(fmaps) == 0 or len(self.fmap_convs) == 0:
             return x
@@ -538,10 +538,10 @@ class Unet3DImagen(nn.Module):
         super().__init__()
         # determine dimensions
         self.channels = in_channels
-        self.channels_out = default_if_none(out_channels, default=in_channels)
+        self.channels_out = unwrap_or(out_channels, default=in_channels)
 
         init_channels = in_channels
-        init_dim = default_if_none(init_dim, default=dim)
+        init_dim = unwrap_or(init_dim, default=dim)
 
         # initial convolution
 

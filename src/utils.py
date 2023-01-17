@@ -1,21 +1,22 @@
 from pathlib import Path
 import tarfile
 from typing import Optional, TypeVar, Union, overload
-from typing_extensions import TypeGuard
 
 import numpy as np
 import numpy.typing as npt
 import torch
 from torch import Tensor
 from torch.types import Number
+from typing_extensions import TypeGuard
 
 __all__ = [
     "default_if_none",
+    "some",
     "to_item",
     "to_numpy",
     "to_targz",
     "torch_eps",
-    "some",
+    "unwrap_or",
 ]
 
 
@@ -25,6 +26,12 @@ T = TypeVar("T")
 def some(value: Optional[T]) -> TypeGuard[T]:
     return value is not None
 
+
+def unwrap_or(value: Optional[T], *, default: T) -> T:
+    return default if value is None else value
+
+
+default_if_none = unwrap_or
 
 DT = TypeVar("DT", bound=Union[np.number, np.bool_])
 
@@ -65,7 +72,3 @@ def to_targz(source: Path, *, output: Optional[Path] = None) -> Path:
             for file in source.iterdir():
                 tar.add(file, arcname=file.name)
     return output
-
-
-def default_if_none(value: Optional[T], *, default: T) -> T:
-    return default if value is None else value

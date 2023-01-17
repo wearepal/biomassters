@@ -4,7 +4,6 @@ from einops import rearrange  # type: ignore
 from einops_exts import rearrange_many  # type: ignore
 import torch
 from torch import Tensor, einsum, nn
-import torch.nn.functional as F
 from typing_extensions import override
 
 from src.utils import default_if_none, some
@@ -22,7 +21,7 @@ __all__ = [
 
 class ChanLayerNorm(nn.Module):
     def __init__(
-            self, dim: int, *, eps: float=1e-5, stable: bool = False, init_zero: bool = False
+        self, dim: int, *, eps: float = 1e-5, stable: bool = False, init_zero: bool = False
     ) -> None:
         super().__init__()
         self.eps = eps
@@ -40,7 +39,7 @@ class ChanLayerNorm(nn.Module):
 
 class LayerNorm(nn.Module):
     def __init__(
-            self, dim: int, *, eps: float=1e-5, stable: bool = False, init_zero: bool = False
+        self, dim: int, *, eps: float = 1e-5, stable: bool = False, init_zero: bool = False
     ) -> None:
         super().__init__()
         self.eps = eps
@@ -72,7 +71,6 @@ def cast_tuple(
     return output
 
 
-# pseudo conv2d that uses conv3d but with kernel size of 1 across frames dimension
 def pseudo_conv2d(
     in_channels: int,
     *,
@@ -83,6 +81,9 @@ def pseudo_conv2d(
     groups: int = 1,
     bias: bool = False,
 ) -> nn.Conv3d:
+    """
+    Pseudo Conv2d that uses Conv3d but with kernel size of 1 across frames dimension.
+    """
     kernel_size = cast_tuple(kernel_size, length=2)
     stride = cast_tuple(stride, length=2)
     padding = cast_tuple(padding, length=2)

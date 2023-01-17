@@ -36,7 +36,7 @@ from typing_extensions import Self, TypeAlias
 from src.data.transforms import InputTransform, TargetTransform
 from src.logging import tqdm_joblib
 from src.types import LitFalse, LitTrue, TestSample, TrainSample
-from src.utils import default_if_none, some
+from src.utils import some
 
 warnings.filterwarnings("ignore", category=rasterio.errors.NotGeoreferencedWarning)
 
