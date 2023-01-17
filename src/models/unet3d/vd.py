@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from src.utils import some
 
-from .common import GlobalContextAttention, ChanLayerNorm, Residual
+from .common import ChanLayerNorm, GlobalContextAttention, Residual
 
 __all__ = ["Unet3dVd"]
 

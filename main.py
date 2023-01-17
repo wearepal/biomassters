@@ -1,11 +1,22 @@
+from typing import Tuple, TypeVar
 import warnings
 
+from omegaconf import OmegaConf
 from ranzen.hydra import Option
 import torch.multiprocessing
 
 from src.algorithms import Erm
-from src.models import Unet3dVdFn, UnetFn, UnetPlusPlusFn, Unet3dImagenFn
+from src.models import Unet3dImagenFn, Unet3dVdFn, UnetFn, UnetPlusPlusFn
 from src.relay import SentinelRelay
+
+T = TypeVar("T")
+
+
+def resolve_tuple(*args: T) -> Tuple[T, ...]:
+    return tuple(args)
+
+
+OmegaConf.register_new_resolver("tuple", resolve_tuple)
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 TO_IGNORE = (

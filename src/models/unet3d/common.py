@@ -22,7 +22,7 @@ __all__ = [
 
 class ChanLayerNorm(nn.Module):
     def __init__(
-        self, dim: int, *, eps=1e-5, stable: bool = False, init_zero: bool = False
+            self, dim: int, *, eps: float=1e-5, stable: bool = False, init_zero: bool = False
     ) -> None:
         super().__init__()
         self.eps = eps
@@ -40,7 +40,7 @@ class ChanLayerNorm(nn.Module):
 
 class LayerNorm(nn.Module):
     def __init__(
-        self, dim: int, *, eps=1e-5, stable: bool = False, init_zero: bool = False
+            self, dim: int, *, eps: float=1e-5, stable: bool = False, init_zero: bool = False
     ) -> None:
         super().__init__()
         self.eps = eps

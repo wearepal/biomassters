@@ -46,10 +46,8 @@ train_transforms:
       posinf: 0.0
       neginf: 0.0
 
-    # - _target_: src.data.transforms.RandomResizedCrop
-    #   p: 1.0
-    #   size: ${tuple:256,256}
-    #   scale: ${tuple:0.4,1.0}
+    - _target_: src.data.transforms.RandomCrop
+      size: ${tuple:64,64}
 
     - _target_: src.data.transforms.RandomHorizontalFlip
       p: 0.5
@@ -97,6 +95,9 @@ eval_transforms:
       - 4.3850e+00
       - 3.2280e+03
       - 3.2258e+03
+
+    - _target_: src.data.transforms.CenterCrop
+      size: ${tuple:64,64}
 
     - _target_: src.data.transforms.NanToNum
       nan: 0.0

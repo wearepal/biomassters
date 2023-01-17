@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-    - override /model: unet3d_vd/temporal_128dim
+    - override /model: unet3d_im/efficient
     - override /dm: all_months/zscore_norm
     - override /alg: erm
     - override /logger: pal
@@ -42,12 +42,12 @@ dm:
   train_batch_size: 1
 
 logger:
-  group: unet3d_128dim_temporal_decoder
+  group: unet3d_imagen_efficient
   tags:
     - base_dim_128
     - attn_head_dim_64
-    - spatial_attn
-    - temporal_decoder
-    - unet3d
+    - no_spatial_attn
+    - unet3d_imagen
     - zscore_norm
+    - linear_warmup
 

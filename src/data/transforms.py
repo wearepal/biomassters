@@ -32,6 +32,7 @@ __all__ = [
     "AppendRatioAB",
     "ApplyToOpticalSlice",
     "ApplyToTimeSlice",
+    "CenterCrop",
     "ClampInput",
     "ClampTarget",
     "ColorJiggle",
@@ -46,10 +47,12 @@ __all__ = [
     "NanToNum",
     "OneOf",
     "Permute",
+    "RandomCrop",
     "RandomHorizontalFlip",
     "RandomResizedCrop",
     "RandomRotation",
     "RandomVerticalFlip",
+    "Resize",
     "Sentinel1Scaler",
     "Sentinel2Scaler",
     "TensorTransform",
@@ -658,6 +661,10 @@ class RandomRotation(TargetTransform):
 
 
 def _apply_along_time_axis(x: Tensor, *, fn: K.AugmentationBase2D) -> Tensor:
+    # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
+    # -- we treat the frame (F) dim as the batch dim, tranposing it to
+    # the 0th (batch) dimension and then reversing the transposition
+    # after the transform has been applied.
     return fn(x.transpose(0, 1)).transpose(0, 1)
 
 
@@ -692,7 +699,7 @@ class ColorJiggle(InputTransform):
             inputs["image"] = inputs["image"].clone()
         # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W) --
         # we treat the frame (F) dim as the batch dim, tranposing it to the 0th
-        # dimension and then reversing the tranposition after the transform has
+        # dimension and then reversing the transposition after the transform has
         # been applied.
         transformed = _apply_along_time_axis(x=inputs["image"][self.rgb_dims], fn=self.fn)
         inputs["image"][self.rgb_dims] = transformed
@@ -706,7 +713,7 @@ class RandomResizedCrop(TargetTransform):
         size: Tuple[int, int],
         scale: Tuple[float, float] = (0.08, 1.0),
         ratio: Tuple[float, float] = (3.0 / 4.0, 4.0 / 3.0),
-        resample: Resample = Resample.BICUBIC,
+        resample: Resample = Resample.BILINEAR,
         align_corners: bool = True,
         p: float = 1.0,
         cropping_mode: str = "slice",
@@ -721,7 +728,6 @@ class RandomResizedCrop(TargetTransform):
             align_corners=align_corners,
             p=1.0,
             cropping_mode=cropping_mode,
-            return_transform=False,
         )
 
     @override
@@ -729,9 +735,98 @@ class RandomResizedCrop(TargetTransform):
         if should_apply(self.p):
             # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
             # -- we treat the frame (F) dim as the batch dim, tranposing it to
-            # the 0th (batch) dimension and then reversing the tranposition
+            # the 0th (batch) dimension and then reversing the transposition
             # after the transform has been applied.
             inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
             transform_matrix = self.fn.transform_matrix[0]
             inputs["label"] = self.fn(inputs["label"], transform_matrix=transform_matrix)
+        return inputs
+
+
+class RandomCrop(TargetTransform):
+    def __init__(
+        self,
+        *,
+        size: Tuple[int, int],
+        resample: Resample = Resample.BILINEAR,
+        align_corners: bool = True,
+        cropping_mode: str = "slice",
+    ) -> None:
+        self.fn = K.RandomCrop(
+            size=size,
+            resample=resample,
+            same_on_batch=True,
+            align_corners=align_corners,
+            p=1.0,
+            cropping_mode=cropping_mode,
+        )
+
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
+        # -- we treat the frame (F) dim as the batch dim, tranposing it to
+        # the 0th (batch) dimension and then reversing the transposition
+        # after the transform has been applied.
+        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
+        transform_matrix = self.fn.transform_matrix[0]
+        inputs["label"] = self.fn(inputs["label"], transform_matrix=transform_matrix)
+        return inputs
+
+
+class CenterCrop(TargetTransform):
+    def __init__(
+        self,
+        *,
+        size: Tuple[int, int],
+        resample: Resample = Resample.BILINEAR,
+        align_corners: bool = True,
+        cropping_mode: str = "slice",
+    ) -> None:
+        self.fn = K.CenterCrop(
+            size=size,
+            resample=resample,
+            align_corners=align_corners,
+            p=1.0,
+            cropping_mode=cropping_mode,
+        )
+
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
+        # -- we treat the frame (F) dim as the batch dim, tranposing it to
+        # the 0th (batch) dimension and then reversing the transposition
+        # after the transform has been applied.
+        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
+        inputs["label"] = self.fn(inputs["label"])
+        return inputs
+
+
+class Resize(TargetTransform):
+    def __init__(
+        self,
+        *,
+        size: Tuple[int, int],
+        side="short",
+        resample: Resample = Resample.BILINEAR,
+        align_corners: bool = True,
+        cropping_mode: str = "slice",
+        antialias: bool = True,
+    ) -> None:
+        self.fn = K.Resize(
+            size=size,
+            side=side,
+            resample=resample,
+            align_corners=align_corners,
+            antialias=antialias,
+            p=1.0,
+        )
+
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
+        # -- we treat the frame (F) dim as the batch dim, tranposing it to
+        # the 0th (batch) dimension and then reversing the transposition
+        # after the transform has been applied.
+        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
+        inputs["label"] = self.fn(inputs["label"])
         return inputs
