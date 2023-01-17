@@ -35,7 +35,7 @@ dm:
 
 trainer:
   precision: 16
-  max_steps: 40000
+  max_steps: 30000
   val_check_interval: 500
   accelerator: gpu
   devices: 4

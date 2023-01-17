@@ -226,4 +226,4 @@ class EtaPool(nn.Module):
         spatial_descriptors = reduce(x, "b c f h w -> b c f", reduction="mean")
         attn = self.attn_fn(self.net(spatial_descriptors))
         attn = rearrange(attn, "b 1 f -> b 1 f 1 1")
-        return reduce(attn * x, "b c f h w -> b c 1 h w", reduction="mean")
+        return reduce(attn * x, "b c f h w -> b c 1 h w", reduction="sum")
