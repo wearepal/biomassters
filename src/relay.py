@@ -63,7 +63,6 @@ class SentinelRelay(Relay):
 
     @override
     def run(self, raw_config: Dict[str, Any]) -> Optional[Number]:
-        loguru.logger.info(f"Current working directory: '{os.getcwd()}'")
         pl.seed_everything(self.seed, workers=True)
         dm: SentinelDataModule = instantiate(self.dm)
         dm.prepare_data()

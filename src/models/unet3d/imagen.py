@@ -234,7 +234,7 @@ class Attention(nn.Module):
         *,
         heads: int = 4,
         dim_head: int = 32,
-        cosine_sim_attn=False,
+        cosine_sim_attn: bool = False,
         init_zero: bool = False,
     ) -> None:
         super().__init__()
@@ -289,6 +289,7 @@ class LinearAttention(nn.Module):
     def __init__(
         self,
         dim: int,
+        *,
         dim_head: int = 32,
         heads: int = 8,
         dropout: float = 0.05,
@@ -396,6 +397,7 @@ class LinearAttentionTransformerBlock(nn.Module):
         heads: int = 8,
         dim_head: int = 32,
         ff_mult: int = 2,
+        **kwargs: Any,
     ) -> None:
         super().__init__()
         self.blocks = nn.ModuleList([])
@@ -616,7 +618,7 @@ class Unet3DImagen(nn.Module):
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
 
-            transformer_block_klass = (
+            transformer_block_cls = (
                 TransformerBlock
                 if layer_attn
                 else (LinearAttentionTransformerBlock if use_linear_attn else Identity)
@@ -667,7 +669,7 @@ class Unet3DImagen(nn.Module):
                                 for _ in range(num_resnet_blocks)
                             ]
                         ),
-                        transformer_block_klass(
+                        transformer_block_cls(
                             dim=current_dim,
                             depth=layer_attn_depth,
                             ff_mult=ff_mult,
@@ -702,9 +704,7 @@ class Unet3DImagen(nn.Module):
             groups=resnet_groups,
         )
 
-        # upsample klass
-
-        upsample_klass = PixelShuffleUpsample if pixel_shuffle_upsample else upsample
+        upsample_cls = PixelShuffleUpsample if pixel_shuffle_upsample else upsample
 
         # upsampling layers
 
@@ -712,7 +712,7 @@ class Unet3DImagen(nn.Module):
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind == (len(in_out) - 1)
-            transformer_block_klass = (
+            transformer_block_cls = (
                 TransformerBlock
                 if layer_attn
                 else (LinearAttentionTransformerBlock if use_linear_attn else Identity)
@@ -741,7 +741,7 @@ class Unet3DImagen(nn.Module):
                                 for _ in range(num_resnet_blocks)
                             ]
                         ),
-                        transformer_block_klass(
+                        transformer_block_cls(
                             dim=dim_out,
                             depth=layer_attn_depth,
                             ff_mult=ff_mult,
@@ -749,7 +749,7 @@ class Unet3DImagen(nn.Module):
                         ),
                         _temporal_peg(dim_out),
                         _temporal_attn(dim_out),
-                        upsample_klass(in_dim=dim_out, out_dim=dim_in)
+                        upsample_cls(in_dim=dim_out, out_dim=dim_in)
                         if not is_last or memory_efficient
                         else Identity(),
                     ]

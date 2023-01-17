@@ -1,0 +1,30 @@
+---
+defaults:
+  - /schema/model: unet3d_imagen
+  - _self_
+attend_at_middle: true
+attn_head_dim: 64
+combine_upsample_fmaps: true
+cosine_sim_attn: false
+dim: 128
+dim_mults: 
+  - 1
+  - 2
+  - 4
+  - 8
+ff_mult: 2
+final_conv_kernel_size: 3
+final_resnet_block: true
+init_dim: null
+init_kernel_size: 7
+layer_attn: false
+layer_attn_depth: 1
+memory_efficient: true
+n_attn_heads: 8
+num_resnet_blocks: 1
+pixel_shuffle_upsample: true
+resnet_groups: 8
+scale_skip_connection: true
+time_rel_pos_bias_depth: 2
+use_gca: true
+use_linear_attn: false
