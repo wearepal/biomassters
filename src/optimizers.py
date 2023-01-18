@@ -4,8 +4,8 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, ca
 import torch
 from torch import Tensor
 from torch.nn import Parameter
-import torch.optim
-from typing_extensions import TypedDict
+from torch.optim import Optimizer
+from typing_extensions import TypeAlias, TypedDict
 
 __all__ = ["Adafactor"]
 
@@ -33,7 +33,10 @@ class ParamState(TypedDict):
     exp_avg_sq_col: Tensor
 
 
-class Adafactor(torch.optim.Optimizer):
+LossClosure: TypeAlias = Callable[..., Tensor]
+
+
+class Adafactor(Optimizer):
     """Implements Adafactor algorithm.
     This implementation is based on:
     `Adafactor: Adaptive Learning Rates with Sublinear Memory Cost
@@ -101,14 +104,14 @@ class Adafactor(torch.optim.Optimizer):
         super().__init__(params, defaults)
 
     @property
-    def supports_memory_efficient_fp16(self):
+    def supports_memory_efficient_fp16(self) -> bool:
         return True
 
     @property
-    def supports_flat_params(self):
+    def supports_flat_params(self) -> bool:
         return False
 
-    def _get_lr(self, param_group: ParamGroup, param_state):
+    def _get_lr(self, param_group: ParamGroup, param_state) -> float:
         rel_step_sz = param_group["lr"]
         if param_group["relative_step"]:
             min_step = 1e-6 * param_state["step"] if param_group["warmup_init"] else 1e-2
@@ -126,14 +129,14 @@ class Adafactor(torch.optim.Optimizer):
     def _rms(self, tensor: Tensor) -> Tensor:
         return tensor.norm(p=2) / (tensor.numel() ** 0.5)  # type: ignore
 
-    def _approx_sq_grad(self, exp_avg_sq_row: Tensor, exp_avg_sq_col: Tensor):
+    def _approx_sq_grad(self, *, exp_avg_sq_row: Tensor, exp_avg_sq_col: Tensor):
         r_factor = (
             (exp_avg_sq_row / exp_avg_sq_row.mean(dim=-1, keepdim=True)).rsqrt_().unsqueeze(-1)
         )
         c_factor = exp_avg_sq_col.unsqueeze(-2).rsqrt()
         return torch.mul(r_factor, c_factor)
 
-    def step(self, closure: Optional[Callable[..., Tensor]] = None) -> Optional[Tensor]:
+    def step(self, closure: Optional[LossClosure] = None) -> Optional[Tensor]:
         """Performs a single optimization step.
         :param closure: A closure that reevaluates the model and returns the loss.
         """
@@ -198,7 +201,9 @@ class Adafactor(torch.optim.Optimizer):
                     exp_avg_sq_col.mul_(beta2t).add_(update.mean(dim=-2), alpha=1.0 - beta2t)
 
                     # Approximation of exponential moving average of square of gradient
-                    update = self._approx_sq_grad(exp_avg_sq_row, exp_avg_sq_col)
+                    update = self._approx_sq_grad(
+                        exp_avg_sq_row=exp_avg_sq_row, exp_avg_sq_col=exp_avg_sq_col
+                    )
                     update.mul_(grad)
                 else:
                     exp_avg_sq = state["exp_avg_sq"]
