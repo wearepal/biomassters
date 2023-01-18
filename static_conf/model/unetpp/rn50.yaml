@@ -1,0 +1,15 @@
+---
+defaults:
+  - /schema/model: unetpp
+  - _self_
+encoder_name: 'resnet50'
+encoder_depth: 5
+encoder_weights: null
+decoder_use_batchnorm: true
+decoder_channels: 
+  - 512
+  - 256
+  - 128
+  - 64
+  - 32
+decoder_attention: false

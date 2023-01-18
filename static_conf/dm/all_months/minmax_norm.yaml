@@ -48,6 +48,12 @@ train_transforms:
       posinf: 0.0
       neginf: 0.0
 
+    - _target_: src.data.transforms.RandomHorizontalFlip
+      p: 0.5
+
+    - _target_: src.data.transforms.RandomRotation
+      p: 0.75
+
     - _target_: src.data.transforms.MinMaxNormalizeTarget
       orig_min: 0.0
       orig_max: 12904.0

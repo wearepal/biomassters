@@ -190,13 +190,26 @@ class Pad(nn.Module):
         return F.pad(x, self.padding, value=self.value)
 
 
-def upsample(in_dim: int, *, out_dim: Optional[int] = None) -> nn.Sequential:
-    out_dim = unwrap_or(out_dim, default=in_dim)
+class Upsample(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        *,
+        out_dim: Optional[int] = None,
+        mode: str = "nearest",
+    ) -> None:
+        super().__init__()
+        self.out_dim = unwrap_or(out_dim, default=in_dim)
+        self.upsampler = nn.Upsample(scale_factor=2, mode=mode)
+        self.conv = pseudo_conv2d(in_dim, out_channels=self.out_dim, kernel_size=3, padding=1)
 
-    return nn.Sequential(
-        nn.Upsample(scale_factor=2, mode="nearest"),
-        pseudo_conv2d(in_dim, out_channels=out_dim, kernel_size=3, padding=1),
-    )
+    @override
+    def forward(self, x: Tensor) -> Tensor:
+        c, f = x.size(1), x.size(2)
+        x = rearrange(x, "b c f h w -> b (c f) h w")
+        x_up = self.upsampler(x)
+        x_up = rearrange(x_up, "b (c f) h w -> b c f h w", c=c, f=f)
+        return self.conv(x_up)
 
 
 class PixelShuffleUpsample(nn.Module):
@@ -332,7 +345,7 @@ class LinearAttention(nn.Module):
 
         fmap = self.norm(fmap)
         q, k, v = (fn(fmap) for fn in (self.to_q, self.to_k, self.to_v))
-        q, k, v = rearrange_many((q, k, v), "b (h c) x y -> (b h) (x y) c", h=h)
+        q, k, v = rearrange_many((q, k, v), "b (h c) f x y -> (b h) (f x y) c", h=h)
 
         q = q.softmax(dim=-1)
         k = k.softmax(dim=-2)
@@ -341,7 +354,7 @@ class LinearAttention(nn.Module):
 
         context = einsum("b n d, b n e -> b d e", k, v)
         out = einsum("b n d, b d e -> b n e", q, context)
-        out = rearrange(out, "(b h) (x y) d -> b (h d) x y", h=h, x=x, y=y)
+        out = rearrange(out, "(b h) (f x y) d -> b (h d) f x y", h=h, x=x, y=y)
 
         out = self.nonlin(out)
         return self.to_out(out)
@@ -705,7 +718,7 @@ class Unet3DImagen(nn.Module):
             groups=resnet_groups,
         )
 
-        upsample_cls = PixelShuffleUpsample if pixel_shuffle_upsample else upsample
+        upsample_cls = PixelShuffleUpsample if pixel_shuffle_upsample else Upsample
 
         # upsampling layers
 
@@ -829,7 +842,7 @@ class Unet3DImagen(nn.Module):
             x = self.init_resnet_block(x)
 
         # go through the layers of the unet, down and up
-        hiddens = []
+        enc_hiddens = []
 
         for (  # type: ignore
             pre_downsample,
@@ -845,12 +858,12 @@ class Unet3DImagen(nn.Module):
 
             for resnet_block in resnet_blocks:
                 x = resnet_block(x)
-                hiddens.append(x)
+                enc_hiddens.append(x)
 
             x = attn_block(x)
             x = temporal_peg(x)
             x = temporal_attn(x, pos_bias=time_attn_bias)
-            hiddens.append(x)
+            enc_hiddens.append(x)
             x = post_downsample(x)
 
         x = self.mid_block1(x)
@@ -862,7 +875,7 @@ class Unet3DImagen(nn.Module):
 
         x = self.mid_block2(x)
 
-        enc_hiddens = []
+        dec_hiddens = []
 
         for (  # type: ignore
             init_block,
@@ -872,22 +885,22 @@ class Unet3DImagen(nn.Module):
             temporal_attn,
             upsample,
         ) in self.decoder_blocks:
-            x = self._add_skip_connection(x, hiddens=hiddens)
+            x = self._add_skip_connection(x, hiddens=enc_hiddens)
             x = init_block(x)
 
             for resnet_block in resnet_blocks:
-                x = self._add_skip_connection(x, hiddens=hiddens)
+                x = self._add_skip_connection(x, hiddens=enc_hiddens)
                 x = resnet_block(x)
 
             x = attn_block(x)
             x = temporal_peg(x)
             x = temporal_attn(x, pos_bias=time_attn_bias)
 
-            enc_hiddens.append(x.contiguous())
+            dec_hiddens.append(x.contiguous())
             x = upsample(x)
 
         # whether to combine all feature maps from upsample blocks
-        x = self.upsample_combiner.forward(x, fmaps=enc_hiddens)
+        x = self.upsample_combiner.forward(x, fmaps=dec_hiddens)
 
         # final top-most residual if needed
 

@@ -1,0 +1,15 @@
+---
+defaults:
+  - /schema/model: unet
+  - _self_
+encoder_name: 'mit_b5'
+encoder_depth: 5
+encoder_weights: null
+decoder_use_batchnorm: false
+decoder_channels: 
+  - 512
+  - 256
+  - 128
+  - 64
+  - 32
+decoder_attention: false

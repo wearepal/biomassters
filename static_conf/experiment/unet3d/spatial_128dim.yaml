@@ -11,38 +11,43 @@ defaults:
 
 alg:
   pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/${EPOCHSECONDS}
-  lr: 3e-4
+  lr: 1e-4
   weight_decay: 1.e-4
-  lr_sched_freq: 1
   test_on_best: false
   loss_fn: null
+    # _target_: torch.nn.HuberLoss
+    # delta: 1.0
     # _target_: src.loss.CharbonnierLoss
     # alpha: 2
   optimizer_cls: 'deepspeed.ops.adam.FusedAdam'
-  scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
-  scheduler_kwargs:
-    T_max: ${ trainer.max_steps }
-    eta_min: 5.0e-7
-  # scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
+  # optimizer_cls: torch.optim.AdamW
+  lr_sched_freq: 1
+  # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
   # scheduler_kwargs:
-  #   warmup_iters: 2000
-  #   total_iters: ${ trainer.max_steps }
-  #   lr_min: 5.0e-7
+  #   T_max: ${ trainer.max_steps }
+  #   eta_min: 5.0e-7
+  scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
+  scheduler_kwargs:
+    warmup_iters: 2000
+    total_iters: ${ trainer.max_steps }
+    lr_min: 5.0e-7
 
 dm:
   num_workers: 24
   train_batch_size: 1
 
 trainer:
-  precision: 16
+  precision: 32
+  # precision: 16
   max_steps: 30000
   val_check_interval: 500
   accelerator: gpu
   devices: 4
-  strategy: deepspeed_stage_2
+  # strategy: deepspeed_stage_2
+  strategy: ddp
 
 logger:
-  group: unet3d_128dim_spatial_attn_bs1
+  group: unet3d_128dim_spatial
   tags:
     - base_dim_128
     - attn_head_dim_64

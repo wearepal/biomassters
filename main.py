@@ -17,6 +17,7 @@ def resolve_tuple(*args: T) -> Tuple[T, ...]:
 
 
 OmegaConf.register_new_resolver("tuple", resolve_tuple)
+OmegaConf.register_new_resolver("eval", eval)
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 TO_IGNORE = (

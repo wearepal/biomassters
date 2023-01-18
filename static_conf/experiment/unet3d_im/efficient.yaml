@@ -9,12 +9,14 @@ defaults:
     - _self_
 
 trainer:
-  precision: 16
-  max_steps: 40000
-  val_check_interval: 500
+  precision: 32
+  max_steps: 120000
+  val_check_interval: 1000
+  accumulate_grad_batches: 4
   accelerator: gpu
   devices: 4
-  strategy: deepspeed_stage_2
+  # strategy: deepspeed_stage_2
+  strategy: ddp_find_unused_parameters_false
 
 alg:
   pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/${EPOCHSECONDS}
@@ -22,9 +24,7 @@ alg:
   weight_decay: 0.0
   lr_sched_freq: 1
   test_on_best: false
-  loss_fn: 
-    _target_: src.loss.CharbonnierLoss
-    alpha: 2
+  loss_fn: null
   optimizer_cls: deepspeed.ops.adam.FusedAdam
 
   # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
@@ -33,8 +33,8 @@ alg:
   #   eta_min: 5.0e-7
   scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
   scheduler_kwargs:
-    warmup_iters: 1000
-    total_iters: ${ trainer.max_steps }
+    warmup_iters: 4000
+    total_iters: 30000
     lr_min: 5.0e-7
 
 dm:

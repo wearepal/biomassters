@@ -454,8 +454,10 @@ class _MinMaxNormalize(Normalize):
     # Buffers
     orig_min: Tensor
     orig_max: Tensor
+    orig_range: Tensor
     new_min: Tensor
     new_max: Tensor
+    new_range: Tensor
 
     def __init__(
         self,
@@ -478,8 +480,9 @@ class _MinMaxNormalize(Normalize):
             raise ValueError("'orig_min' cannot be greater than 'orig_max'.")
         if (self.new_min > self.new_max).any():
             raise ValueError("'new_min' cannot be greater than 'new_max'.")
-        self.new_range = self.new_max - self.new_min
-        self.orig_range = self.orig_max - self.orig_min
+
+        self.register_buffer("new_range", self.new_max - self.new_min)
+        self.register_buffer("orig_range", self.orig_max - self.orig_min)
 
     @override
     def _inverse_transform(self, data: Tensor) -> Tensor:
