@@ -664,12 +664,41 @@ class RandomRotation(TargetTransform):
         return inputs
 
 
-def _apply_along_time_axis(x: Tensor, *, fn: K.AugmentationBase2D) -> Tensor:
+@overload
+def _apply_along_time_axis(inputs: Tensor, *, fn: K.AugmentationBase2D) -> Tensor:
+    ...
+
+
+@overload
+def _apply_along_time_axis(inputs: TrainSample, *, fn: K.AugmentationBase2D) -> TrainSample:
+    ...
+
+
+@overload
+def _apply_along_time_axis(inputs: S, *, fn: K.AugmentationBase2D) -> S:
+    ...
+
+
+def _apply_along_time_axis(
+    inputs: Union[Tensor, TrainSample, S], *, fn: K.AugmentationBase2D
+) -> Union[Tensor, TrainSample, S]:
     # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
     # -- we treat the frame (F) dim as the batch dim, tranposing it to
     # the 0th (batch) dimension and then reversing the transposition
     # after the transform has been applied.
-    return fn(x.transpose(0, 1)).transpose(0, 1)
+    if isinstance(inputs, Tensor):
+        inputs = fn(inputs.transpose(0, 1)).transpose(0, 1)
+    elif "label" in inputs:
+        inputs = cast(TrainSample, inputs)
+        x_t = inputs["image"].transpose(0, 1)
+        xy = torch.cat((x_t, inputs["label"][None]), dim=0)
+        xy_tformed = fn(xy)
+        x_tformed, y_tformed = xy_tformed.split(len(x_t))
+        inputs["image"] = x_tformed.transpose(0, 1)
+        inputs["label"] = y_tformed.squeeze(0)
+    else:
+        inputs["image"] = fn(inputs["image"].transpose(0, 1)).transpose(0, 1)
+    return inputs
 
 
 class ColorJiggle(InputTransform):
@@ -705,7 +734,7 @@ class ColorJiggle(InputTransform):
         # we treat the frame (F) dim as the batch dim, tranposing it to the 0th
         # dimension and then reversing the transposition after the transform has
         # been applied.
-        transformed = _apply_along_time_axis(x=inputs["image"][self.rgb_dims], fn=self.fn)
+        transformed = _apply_along_time_axis(inputs=inputs["image"][self.rgb_dims], fn=self.fn)
         inputs["image"][self.rgb_dims] = transformed
         return inputs
 
@@ -732,18 +761,13 @@ class RandomResizedCrop(TargetTransform):
             align_corners=align_corners,
             p=1.0,
             cropping_mode=cropping_mode,
+            keepdim=True,
         )
 
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
         if should_apply(self.p):
-            # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
-            # -- we treat the frame (F) dim as the batch dim, tranposing it to
-            # the 0th (batch) dimension and then reversing the transposition
-            # after the transform has been applied.
-            inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
-            transform_matrix = self.fn.transform_matrix[0]
-            inputs["label"] = self.fn(inputs["label"], transform_matrix=transform_matrix)
+            inputs = _apply_along_time_axis(inputs=inputs, fn=self.fn)
         return inputs
 
 
@@ -767,14 +791,7 @@ class RandomCrop(TargetTransform):
 
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
-        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
-        # -- we treat the frame (F) dim as the batch dim, tranposing it to
-        # the 0th (batch) dimension and then reversing the transposition
-        # after the transform has been applied.
-        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
-        transform_matrix = self.fn.transform_matrix[0]
-        inputs["label"] = self.fn(inputs["label"], transform_matrix=transform_matrix)
-        return inputs
+        return _apply_along_time_axis(inputs=inputs, fn=self.fn)
 
 
 class CenterCrop(TargetTransform):
@@ -796,13 +813,7 @@ class CenterCrop(TargetTransform):
 
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
-        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
-        # -- we treat the frame (F) dim as the batch dim, tranposing it to
-        # the 0th (batch) dimension and then reversing the transposition
-        # after the transform has been applied.
-        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
-        inputs["label"] = self.fn(inputs["label"])
-        return inputs
+        return _apply_along_time_axis(inputs=inputs, fn=self.fn)
 
 
 class _Resize:
@@ -813,7 +824,6 @@ class _Resize:
         side="short",
         resample: Resample = Resample.BILINEAR,
         align_corners: bool = True,
-        cropping_mode: str = "slice",
         antialias: bool = True,
     ) -> None:
         self.fn = K.Resize(
@@ -829,13 +839,11 @@ class _Resize:
 class ResizeInput(_Resize, InputTransform):
     @override
     def __call__(self, inputs: S) -> S:
-        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
+        inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
         return inputs
 
 
 class ResizeBoth(_Resize, TargetTransform):
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
-        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
-        inputs["label"] = self.fn(inputs["label"])
-        return inputs
+        return _apply_along_time_axis(inputs=inputs, fn=self.fn)
