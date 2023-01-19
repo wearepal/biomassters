@@ -52,7 +52,8 @@ __all__ = [
     "RandomResizedCrop",
     "RandomRotation",
     "RandomVerticalFlip",
-    "Resize",
+    "ResizeBoth",
+    "ResizeInput",
     "Sentinel1Scaler",
     "Sentinel2Scaler",
     "TensorTransform",
@@ -804,7 +805,7 @@ class CenterCrop(TargetTransform):
         return inputs
 
 
-class Resize(TargetTransform):
+class _Resize:
     def __init__(
         self,
         *,
@@ -824,12 +825,17 @@ class Resize(TargetTransform):
             p=1.0,
         )
 
+
+class ResizeInput(_Resize, InputTransform):
+    @override
+    def __call__(self, inputs: S) -> S:
+        inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
+        return inputs
+
+
+class ResizeBoth(_Resize, TargetTransform):
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
-        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
-        # -- we treat the frame (F) dim as the batch dim, tranposing it to
-        # the 0th (batch) dimension and then reversing the transposition
-        # after the transform has been applied.
         inputs["image"] = _apply_along_time_axis(x=inputs["image"], fn=self.fn)
         inputs["label"] = self.fn(inputs["label"])
         return inputs

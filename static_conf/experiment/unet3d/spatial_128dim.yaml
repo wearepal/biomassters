@@ -21,6 +21,8 @@ alg:
     # alpha: 2
   optimizer_cls: 'deepspeed.ops.adam.FusedAdam'
   # optimizer_cls: torch.optim.AdamW
+  # optimizer_cls: src.optimizers.Adafactor
+  # optimizer_cls: bitsandbytes.optim.Adam8bit
   lr_sched_freq: 1
   # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
   # scheduler_kwargs:
@@ -28,8 +30,8 @@ alg:
   #   eta_min: 5.0e-7
   scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
   scheduler_kwargs:
-    warmup_iters: 2000
-    total_iters: ${ trainer.max_steps }
+    warmup_iters: ${eval:'2000 * ${trainer.accumulate_grad_batches}'}
+    total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
     lr_min: 5.0e-7
 
 dm:
@@ -37,14 +39,12 @@ dm:
   train_batch_size: 1
 
 trainer:
-  precision: 32
-  # precision: 16
+  precision: 16
   max_steps: 30000
-  val_check_interval: 500
+  val_check_interval: ${eval:'500 * ${trainer.accumulate_grad_batches}'}
   accelerator: gpu
   devices: 4
-  # strategy: deepspeed_stage_2
-  strategy: ddp
+  strategy: deepspeed_stage_2
 
 logger:
   group: unet3d_128dim_spatial
