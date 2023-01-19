@@ -83,7 +83,7 @@ class Adafactor(Optimizer):
         lr: Optional[float] = None,
         eps: Tuple[float, float] = (1e-30, 1e-3),
         clipping_threshold: float = 1.0,
-        decay_rate: float = -0.8,
+        decay_rate: float = 0.8,
         beta1: Optional[float] = None,
         weight_decay: float = 0.0,
         multiply_by_parameter_scale: bool = False,
