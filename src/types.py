@@ -1,5 +1,5 @@
-from __future__ import annotations
-from typing import Any, Generic, List, Literal, TypeVar
+from functools import partial
+from typing import Any, Dict, Generic, List, Literal, Type, TypeVar, get_type_hints
 
 from torch import Tensor
 from typing_extensions import TypeAlias, TypedDict, TypeGuard
@@ -11,6 +11,7 @@ __all__ = [
     "TestSample",
     "TrainSample",
     "is_image_sample",
+    "is_td_instance",
     "is_test_sample",
     "is_train_sample",
 ]
@@ -35,13 +36,19 @@ class TrainSample(ImageSample):
     label: Tensor
 
 
-def is_image_sample(inputs: Any) -> TypeGuard[ImageSample]:
-    return isinstance(inputs, dict) and "image" in inputs
+TD = TypeVar("TD", bound=TypedDict)
 
 
-def is_test_sample(inputs: Any) -> TypeGuard[TestSample]:
-    return isinstance(inputs, dict) and "image" in inputs and "chip" in inputs
+def is_td_instance(dict_: Dict[str, Any], cls_: Type[TD], *, strict: bool = False) -> TypeGuard[TD]:
+    hints = get_type_hints(cls_)
+    if strict and (len(dict_) != len(hints)):
+        return False
+    for key, type_ in hints.items():
+        if (key not in dict_) or (not isinstance(dict_[key], type_)):
+            return False
+    return True
 
 
-def is_train_sample(inputs: Any) -> TypeGuard[TrainSample]:
-    return isinstance(inputs, dict) and "image" in inputs and "label" in inputs
+is_image_sample = partial(is_td_instance, cls_=ImageSample)
+is_test_sample = partial(is_td_instance, cls_=TestSample)
+is_train_sample = partial(is_td_instance, cls_=TrainSample)
