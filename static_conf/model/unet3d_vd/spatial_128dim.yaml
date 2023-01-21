@@ -8,7 +8,7 @@ dim_mults:
   - 2
   - 4
   - 8
-n_attn_heads: 8
+num_attn_heads: 8
 attn_head_dim: 64
 init_dim: null
 init_kernel_size: 7
@@ -18,3 +18,7 @@ spatial_decoder: true
 use_gca: false
 cosine_sim_attn: false
 apply_mid_spatial_attn: true
+pixel_shuffle: false
+num_resnet_blocks: 1
+scale_skip_connection: true
+

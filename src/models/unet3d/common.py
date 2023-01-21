@@ -1,12 +1,12 @@
 from typing import Any, List, Literal, Optional, Tuple, TypeVar, Union
 
-from einops import rearrange, reduce  # type: ignore
+from einops import rearrange, reduce, repeat  # type: ignore
 from einops_exts import rearrange_many  # type: ignore
 import torch
 from torch import Tensor, einsum, nn
 from typing_extensions import override
 
-from src.utils import default_if_none, some
+from src.utils import default_if_none, some, unwrap_or
 
 __all__ = [
     "AxialConv3d",
@@ -17,6 +17,7 @@ __all__ = [
     "Residual",
     "cast_tuple",
     "pseudo_conv2d",
+    "PixelShuffleUpsample",
 ]
 
 
@@ -227,3 +228,32 @@ class EtaPool(nn.Module):
         attn = self.attn_fn(self.net(spatial_descriptors))
         attn = rearrange(attn, "b 1 f -> b 1 f 1 1")
         return reduce(attn * x, "b c f h w -> b c 1 h w", reduction="sum")
+
+
+class PixelShuffleUpsample(nn.Module):
+    def __init__(self, in_dim: int, *, out_dim: Optional[int] = None) -> None:
+        super().__init__()
+        out_dim = unwrap_or(out_dim, default=in_dim)
+        conv = pseudo_conv2d(in_dim, out_channels=out_dim * 4, kernel_size=1)
+        self._init_conv(conv)
+
+        self.net = nn.Sequential(conv, nn.SiLU())
+
+        self.pixel_shuffle = nn.PixelShuffle(upscale_factor=2)
+
+    def _init_conv(self, conv: nn.Conv3d) -> None:
+        o, i, f, h, w = conv.weight.shape
+        conv_weight = torch.empty(o // 4, i, f, h, w)
+        nn.init.kaiming_uniform_(conv_weight)
+        conv_weight = repeat(conv_weight, "o ... -> (o 4) ...")
+        conv.weight.data.copy_(conv_weight)
+        if some(conv.bias):
+            nn.init.zeros_(conv.bias.data)
+
+    @override
+    def forward(self, x: Tensor) -> Tensor:
+        out = self.net(x)
+        frames = x.shape[2]
+        out = rearrange(out, "b c f h w -> (b f) c h w")
+        out = self.pixel_shuffle(out)
+        return rearrange(out, "(b f) c h w -> b c f h w", f=frames)

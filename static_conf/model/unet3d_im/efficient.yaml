@@ -17,10 +17,11 @@ final_conv_kernel_size: 3
 final_resnet_block: true
 init_dim: null
 init_kernel_size: 7
+init_conv_to_final_conv_residual: true
 layer_attn: false
 layer_attn_depth: 1
 memory_efficient: true
-n_attn_heads: 8
+num_attn_heads: 8
 num_resnet_blocks: 1
 pixel_shuffle_upsample: true
 resnet_groups: 8

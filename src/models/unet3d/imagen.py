@@ -18,6 +18,7 @@ from .common import (
     EtaPool,
     GlobalContextAttention,
     LayerNorm,
+    PixelShuffleUpsample,
     Residual,
     cast_tuple,
     pseudo_conv2d,
@@ -210,35 +211,6 @@ class Upsample(nn.Module):
         x_up = self.upsampler(x)
         x_up = rearrange(x_up, "b (c f) h w -> b c f h w", c=c, f=f)
         return self.conv(x_up)
-
-
-class PixelShuffleUpsample(nn.Module):
-    def __init__(self, in_dim: int, *, out_dim: Optional[int] = None) -> None:
-        super().__init__()
-        out_dim = unwrap_or(out_dim, default=in_dim)
-        conv = pseudo_conv2d(in_dim, out_channels=out_dim * 4, kernel_size=1)
-
-        self.net = nn.Sequential(conv, nn.SiLU())
-
-        self.pixel_shuffle = nn.PixelShuffle(upscale_factor=2)
-        self._init_conv(conv)
-
-    def _init_conv(self, conv: nn.Conv3d) -> None:
-        o, i, f, h, w = conv.weight.shape
-        conv_weight = torch.empty(o // 4, i, f, h, w)
-        nn.init.kaiming_uniform_(conv_weight)
-        conv_weight = repeat(conv_weight, "o ... -> (o 4) ...")
-        conv.weight.data.copy_(conv_weight)
-        if some(conv.bias):
-            nn.init.zeros_(conv.bias.data)
-
-    @override
-    def forward(self, x: Tensor) -> Tensor:
-        out = self.net(x)
-        frames = x.shape[2]
-        out = rearrange(out, "b c f h w -> (b f) c h w")
-        out = self.pixel_shuffle(out)
-        return rearrange(out, "(b f) c h w -> b c f h w", f=frames)
 
 
 class Attention(nn.Module):
@@ -526,7 +498,7 @@ class Unet3DImagen(nn.Module):
         in_channels: int = 3,
         out_channels: Optional[int] = None,
         attn_head_dim: int = 64,
-        n_attn_heads: int = 8,
+        num_attn_heads: int = 8,
         ff_mult: int = 2,
         layer_attn: bool = False,
         layer_attn_depth: int = 1,
@@ -537,7 +509,7 @@ class Unet3DImagen(nn.Module):
         resnet_groups: int = 8,
         init_kernel_size: int = 7,
         memory_efficient: bool = False,
-        init_conv_to_final_conv_residual=False,
+        init_conv_to_final_conv_residual: bool = False,
         use_gca: bool = True,
         scale_skip_connection: bool = True,
         final_resnet_block: bool = True,
@@ -571,7 +543,7 @@ class Unet3DImagen(nn.Module):
 
         # attention related params
         attn_kwargs = dict(
-            heads=n_attn_heads, dim_head=attn_head_dim, cosine_sim_attn=cosine_sim_attn
+            heads=num_attn_heads, dim_head=attn_head_dim, cosine_sim_attn=cosine_sim_attn
         )
         # temporal attention - attention across video frames
         def _temporal_peg(dim: int) -> Residual:
@@ -597,7 +569,7 @@ class Unet3DImagen(nn.Module):
         # temporal attention relative positional encoding
 
         self.time_rel_pos_bias = DynamicPositionBias(
-            dim=dim * 2, heads=n_attn_heads, depth=time_rel_pos_bias_depth
+            dim=dim * 2, heads=num_attn_heads, depth=time_rel_pos_bias_depth
         )
 
         # initial resnet block (for memory efficient unet)
@@ -910,4 +882,4 @@ class Unet3DImagen(nn.Module):
         x = self.temporal_pool(x)
         x = self.final_res_block(x)
 
-        return self.final_conv(x)
+        return self.final_conv(x).squeeze(dim=2)

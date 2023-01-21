@@ -48,7 +48,7 @@ class SentinelDataModule(pl.LightningDataModule):
         eval_batch_size: Optional[int] = None,
         num_workers: int = 0,
         persist_workers: bool = False,
-        pin_memory: bool = False,
+        pin_memory: bool = True,
         root: Union[Path, str] = "/srv/galene0/shared/data/biomassters/",
         tile_dir: Optional[Path] = None,
         group_by: SentinelDataset.GroupBy = SentinelDataset.GroupBy.CHIP,

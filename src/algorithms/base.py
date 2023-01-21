@@ -5,9 +5,9 @@ from PIL import Image
 from conduit.data.structures import TernarySample
 from conduit.types import LRScheduler, Stage
 from hydra.utils import instantiate
-from loguru import logger
 from omegaconf.dictconfig import DictConfig
 import pytorch_lightning as pl
+from pytorch_lightning.utilities.rank_zero import rank_zero_only  # type: ignore
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 from ranzen.torch.data import TrainingMode
 import torch
@@ -207,7 +207,7 @@ class Algorithm(pl.LightningModule):
             )
         if some(self.pred_dir):
             self.pred_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Generating predictions and saving them to '{self.pred_dir.resolve()}'.")
+            self.print(f"Generating predictions and saving them to '{self.pred_dir.resolve()}'.")
             try:
                 trainer.predict(
                     model=self, datamodule=dm, ckpt_path="best" if self.predict_with_best else None
@@ -216,12 +216,18 @@ class Algorithm(pl.LightningModule):
             # will result in an error
             except ValueError:
                 trainer.predict(model=self, datamodule=dm)
-            # Tar pred_dir so that it's in a submission-ready state.
-            logger.info("Archiving the generated predictions so they're ready-for-submission.")
-            output_path = to_targz(source=self.pred_dir)
-            logger.info(f"Predictions archived to {output_path.resolve()}")
+
+            self._archive_predictions()
 
         return self
+
+    @rank_zero_only
+    def _archive_predictions(self):
+        if some(self.pred_dir):
+            # Tar pred_dir so that it's in a submission-ready state.
+            self.print("Archiving the generated predictions so they're ready-for-submission.")
+            output_path = to_targz(source=self.pred_dir)
+            self.print(f"Predictions archived to {output_path.resolve()}")
 
     def _setup(self, *, dm: SentinelDataModule, model: nn.Module) -> None:
         self.model = model

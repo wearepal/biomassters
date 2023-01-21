@@ -9,37 +9,40 @@ defaults:
     - _self_
 
 trainer:
-  precision: 32
-  max_steps: 120000
-  val_check_interval: 1000
+  precision: 16
+  max_steps: ${eval:'30000 * ${trainer.accumulate_grad_batches}'}
+  val_check_interval: ${eval:'500 * ${trainer.accumulate_grad_batches}'}
   accumulate_grad_batches: 4
   accelerator: gpu
   devices: 4
-  # strategy: deepspeed_stage_2
-  strategy: ddp_find_unused_parameters_false
+  strategy: 
+    _target_: pytorch_lightning.strategies.DeepSpeedStrategy
+    stage: 2
+    offload_optimizer: false
+    offload_parameters: false
+    min_loss_scale: 1
 
 alg:
   pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/${EPOCHSECONDS}
   lr: 3e-4
-  weight_decay: 0.0
   lr_sched_freq: 1
   test_on_best: false
-  loss_fn: null
-  optimizer_cls: deepspeed.ops.adam.FusedAdam
+  loss_fn: 
+    _target_: torch.nn.HuberLoss
+    delta: 1.0
 
-  # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
-  # scheduler_kwargs:
-  #   T_max: ${ trainer.max_steps }
-  #   eta_min: 5.0e-7
+  optimizer_cls: deepspeed.ops.adam.FusedAdam
+  weight_decay: 0.0
+
   scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
   scheduler_kwargs:
-    warmup_iters: 4000
-    total_iters: 30000
+    warmup_iters: ${eval:'2000 * ${trainer.accumulate_grad_batches}'}
+    total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
     lr_min: 5.0e-7
 
 dm:
   num_workers: 24
-  train_batch_size: 1
+  train_batch_size: 2
 
 logger:
   group: unet3d_imagen_efficient

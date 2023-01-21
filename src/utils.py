@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import tarfile
 from typing import Optional, TypeVar, Union, overload
@@ -69,6 +70,5 @@ def to_targz(source: Path, *, output: Optional[Path] = None) -> Path:
     if not output.exists():
         output.parent.mkdir(exist_ok=True, parents=True)
         with tarfile.open(output, "w:gz") as tar:
-            for file in source.iterdir():
-                tar.add(file, arcname=file.name)
+            tar.add(source, recursive=True, arcname=os.path.sep)
     return output

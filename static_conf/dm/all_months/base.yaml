@@ -13,7 +13,7 @@ train_batch_size: 16
 eval_batch_size: null
 num_workers: 0
 persist_workers: false
-pin_memory: false
+pin_memory: true
 tile_dir: null
 n_pp_jobs: 4
 split_seed: 47

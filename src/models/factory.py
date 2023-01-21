@@ -78,36 +78,46 @@ class UnetPlusPlusFn(ModelFactory[smp.UnetPlusPlus]):
 class Unet3dVdFn(ModelFactory[Unet3dVd]):
     IS_TEMPORAL: ClassVar[bool] = True
 
-    dim: int = 64
+    apply_mid_spatial_attn: bool = True
+    attn_head_dim: int = 64
+    cosine_sim_attn: bool = False
+    dim: int = 128
     dim_mults: Tuple[int, ...] = (1, 2, 4, 8)
-    n_attn_heads: int = 8
-    attn_head_dim: int = 32
     init_dim: Optional[int] = None
     init_kernel_size: int = 7
-    use_sparse_linear_attn: bool = False
+    max_distance: int = 32
+    memory_efficient: bool = False
+    num_attn_heads: int = 8
+    num_resnet_blocks: int = 1
+    pixel_shuffle: bool = False
     resnet_groups: int = 8
-    spatial_decoder: bool = True
-    use_gca: bool = False
-    cosine_sim_attn: bool = False
-    apply_mid_spatial_attn: bool = True
+    scale_skip_connection: bool = True
+    spatial_decoder: bool = False
+    use_gca: bool = True
+    use_sparse_linear_attn: bool = False
 
     @override
     def __call__(self, in_channels):
         return Unet3dVd(
-            in_channels=in_channels,
-            out_channels=1,
+            apply_mid_spatial_attn=self.apply_mid_spatial_attn,
+            attn_head_dim=self.attn_head_dim,
+            cosine_sim_attn=self.cosine_sim_attn,
             dim=self.dim,
             dim_mults=self.dim_mults,
-            n_attn_heads=self.n_attn_heads,
-            attn_head_dim=self.attn_head_dim,
+            in_channels=in_channels,
             init_dim=self.init_dim,
             init_kernel_size=self.init_kernel_size,
-            use_sparse_linear_attn=self.use_sparse_linear_attn,
-            spatial_decoder=self.spatial_decoder,
+            max_distance=self.max_distance,
+            memory_efficient=self.memory_efficient,
+            num_attn_heads=self.num_attn_heads,
+            num_resnet_blocks=self.num_resnet_blocks,
+            out_channels=1,
+            pixel_shuffle=self.pixel_shuffle,
             resnet_groups=self.resnet_groups,
+            scale_skip_connection=self.scale_skip_connection,
+            spatial_decoder=self.spatial_decoder,
             use_gca=self.use_gca,
-            cosine_sim_attn=self.cosine_sim_attn,
-            apply_mid_spatial_attn=self.apply_mid_spatial_attn,
+            use_sparse_linear_attn=self.use_sparse_linear_attn,
         )
 
 
@@ -123,13 +133,13 @@ class Unet3dImagenFn(ModelFactory[Unet3DImagen]):
     ff_mult: int = 2
     final_conv_kernel_size: int = 3
     final_resnet_block: bool = True
-    init_conv_to_final_conv_residual = False
+    init_conv_to_final_conv_residual: bool = False
     init_dim: Optional[int] = None
     init_kernel_size: int = 7
     layer_attn: bool = False
     layer_attn_depth: int = 1
     memory_efficient: bool = False
-    n_attn_heads: int = 8
+    num_attn_heads: int = 8
     num_resnet_blocks: int = 1
     pixel_shuffle_upsample: bool = True
     resnet_groups: int = 8
@@ -157,7 +167,7 @@ class Unet3dImagenFn(ModelFactory[Unet3DImagen]):
             layer_attn=self.layer_attn,
             layer_attn_depth=self.layer_attn_depth,
             memory_efficient=self.memory_efficient,
-            n_attn_heads=self.n_attn_heads,
+            num_attn_heads=self.num_attn_heads,
             out_channels=1,
             pixel_shuffle_upsample=self.pixel_shuffle_upsample,
             resnet_groups=self.resnet_groups,
