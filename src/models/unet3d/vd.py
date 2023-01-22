@@ -737,7 +737,7 @@ class Unet3dVd(nn.Module):
         upsample_fmap_dims = []
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind >= (num_resolutions - 1)
-            upsample_fmap_dims.append(dim_out)
+            upsample_fmap_dims.append(dim_in)
             self.decoder_stages.append(
                 DecoderStage(
                     dim_in=dim_out,
@@ -774,7 +774,7 @@ class Unet3dVd(nn.Module):
             # dim of decoder's output + init residual dim
             final_conv_dim = dim * 2
 
-        self.final_temporal_pool = EtaPool(dim * 2, kernel_size=3)
+        self.final_temporal_pool = EtaPool(final_conv_dim, kernel_size=3)
 
         # Final (2d) conv block operating on temporally-pooled features
         self.final_conv = nn.Sequential(
@@ -802,10 +802,10 @@ class Unet3dVd(nn.Module):
         fmaps = []
         for stage in self.decoder_stages:
             stage = cast(DecoderStage, stage)
-            x, fmap = stage.forward(
+            x, stage_fmap = stage.forward(
                 x, skip_connections=skip_connections, pos_bias=time_rel_pos_bias
             )
-            fmaps.append(fmaps)
+            fmaps.append(stage_fmap)
 
         # whether to combine all feature maps from upsample blocks
         if some(self.upsample_combiner):

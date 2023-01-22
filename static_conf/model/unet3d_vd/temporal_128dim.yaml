@@ -22,3 +22,4 @@ use_gca: true
 pixel_shuffle: false
 scale_skip_connection: true
 memory_efficient: false
+combine_upsample_fmaps: false

@@ -18,9 +18,10 @@ trainer:
     stage: 2
     offload_optimizer: false
     offload_parameters: false
-    min_loss_scale: 1
+    min_loss_scale: 0.1
 
   val_check_interval: ${eval:'500 * ${trainer.accumulate_grad_batches}'}
+  gradient_clip_val: 100
 
 alg:
   pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/${EPOCHSECONDS}
@@ -28,14 +29,11 @@ alg:
   weight_decay: 0.0
   test_on_best: false
   loss_fn: 
-    # null
     _target_: torch.nn.HuberLoss
     delta: 1.0
-    # _target_: src.loss.CharbonnierLoss
-    # alpha: 2
-  optimizer_cls: deepspeed.ops.adam.FusedAdam
+  # optimizer_cls: deepspeed.ops.adam.FusedAdam
   # optimizer_cls: torch.optim.AdamW
-  # optimizer_cls: src.optimizers.Adafactor
+  optimizer_cls: src.optimizers.Adafactor
   # optimizer_cls: bitsandbytes.optim.Adam8bit
   lr_sched_freq: 1
   # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
