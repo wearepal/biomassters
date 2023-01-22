@@ -95,12 +95,14 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     spatial_decoder: bool = False
     use_gca: bool = True
     use_sparse_linear_attn: bool = False
+    combine_upsample_fmaps: bool = False
 
     @override
     def __call__(self, in_channels):
         return Unet3dVd(
             apply_mid_spatial_attn=self.apply_mid_spatial_attn,
             attn_head_dim=self.attn_head_dim,
+            combine_upsample_fmaps=self.combine_upsample_fmaps,
             cosine_sim_attn=self.cosine_sim_attn,
             dim=self.dim,
             dim_mults=self.dim_mults,

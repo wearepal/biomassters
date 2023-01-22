@@ -1,6 +1,6 @@
 # Adapted shamelessly from https://github.com/lucidrains/video-diffusion-pytorch
 import math
-from typing import Any, List, Optional, Tuple, cast
+from typing import Any, List, Literal, Optional, Sequence, Tuple, Union, cast
 
 from einops import rearrange  # type: ignore
 from einops_exts import rearrange_many  # type: ignore
@@ -18,6 +18,7 @@ from .common import (
     GlobalContextAttention,
     PixelShuffleUpsample,
     Residual,
+    cast_tuple,
 )
 
 __all__ = ["Unet3dVd"]
@@ -307,6 +308,62 @@ def temporal_attention(
     )
 
 
+def resize_video_to(
+    video: Tensor,
+    *,
+    target_image_size: Union[int, Tuple[int, int]],
+    clamp_range: Optional[Tuple[int, int]] = None,
+    mode: Literal["nearest", "linear", "bilinear", "bicubic"] = "bilinear",
+) -> Tensor:
+    orig_video_size = video.shape[-1]
+
+    if orig_video_size == target_image_size:
+        return video
+
+    frames = video.shape[2]
+    video = rearrange(video, "b c f h w -> (b f) c h w")
+
+    out = F.interpolate(video, target_image_size, mode=mode)
+
+    if some(clamp_range):
+        out = out.clamp(*clamp_range)
+
+    out = rearrange(out, "(b f) c h w -> b c f h w", f=frames)
+
+    return out
+
+
+class UpsampleCombiner(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        *,
+        dim_ins: Tuple[int, ...] = (),
+        dim_outs: Union[int, Tuple[int, ...]] = (),
+    ) -> None:
+        super().__init__()
+        dim_outs = cast_tuple(dim_outs, length=len(dim_ins))
+        assert len(dim_ins) == len(dim_outs)
+
+        self.fmap_convs = nn.ModuleList(
+            [Block3d(in_dim=dim_in, out_dim=dim_out) for dim_in, dim_out in zip(dim_ins, dim_outs)]
+        )
+        self.dim_out = dim + (sum(dim_outs) if len(dim_outs) > 0 else 0)
+
+    @override
+    def forward(self, x: Tensor, *, fmaps: Optional[Sequence[Tensor]] = None) -> Tensor:
+        target_size = x.shape[-1]
+
+        fmaps = unwrap_or(fmaps, default=())
+
+        if (len(fmaps) == 0) or (len(self.fmap_convs) == 0):
+            return x
+
+        fmaps = [resize_video_to(fmap, target_image_size=target_size) for fmap in fmaps]
+        outs = [conv(fmap) for fmap, conv in zip(fmaps, self.fmap_convs)]
+        return torch.cat((x, *outs), dim=1)
+
+
 class EncoderStage(nn.Module):
     def __init__(
         self,
@@ -472,7 +529,9 @@ class DecoderStage(nn.Module):
             self.upsample = nn.Identity()
 
     @override
-    def forward(self, x: Tensor, *, skip_connections: List[Tensor], pos_bias: Tensor) -> Tensor:
+    def forward(
+        self, x: Tensor, *, skip_connections: List[Tensor], pos_bias: Tensor
+    ) -> Tuple[Tensor, Tensor]:
         x = _add_skip_connection(
             x, skip_connections=skip_connections, scale=self.skip_connect_scale
         )
@@ -486,7 +545,7 @@ class DecoderStage(nn.Module):
         x = self.spatial_attn(x)
         if some(self.temporal_attn):
             x = self.temporal_attn(x, pos_bias=pos_bias)
-        return self.upsample(x)
+        return self.upsample(x), x
 
 
 class MiddleStage(nn.Module):
@@ -536,7 +595,6 @@ class MiddleStage(nn.Module):
             groups=groups,
             use_gca=use_gca,
         )
-        # self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
         self.temporal_pool = EtaPool(dim, kernel_size=3) if temporal_pooling else nn.Identity()
 
     @override
@@ -572,6 +630,7 @@ class Unet3dVd(nn.Module):
         pixel_shuffle: bool = False,
         scale_skip_connection: bool = True,
         memory_efficient: bool = False,
+        combine_upsample_fmaps: bool = False,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -675,9 +734,10 @@ class Unet3dVd(nn.Module):
             temporal_pooling=spatial_decoder,
         )
 
+        upsample_fmap_dims = []
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind >= (num_resolutions - 1)
-
+            upsample_fmap_dims.append(dim_out)
             self.decoder_stages.append(
                 DecoderStage(
                     dim_in=dim_out,
@@ -699,11 +759,26 @@ class Unet3dVd(nn.Module):
                 )
             )
 
-        # self.temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
+        if combine_upsample_fmaps:
+            self.upsample_combiner = UpsampleCombiner(
+                dim=dim,
+                dim_ins=tuple(upsample_fmap_dims),
+                dim_outs=dim,
+            )
+            # init residual dim + dim of the tensor resulting from the
+            # concatenation of the upsampled (and convolved) fmaps and
+            # decoder's output.
+            final_conv_dim = dim + self.upsample_combiner.dim_out
+        else:
+            self.upsample_combiner = None
+            # dim of decoder's output + init residual dim
+            final_conv_dim = dim * 2
+
         self.final_temporal_pool = EtaPool(dim * 2, kernel_size=3)
+
         # Final (2d) conv block operating on temporally-pooled features
         self.final_conv = nn.Sequential(
-            ResnetBlock3d(in_dim=dim * 2, out_dim=dim, groups=resnet_groups, use_gca=True),
+            ResnetBlock3d(in_dim=final_conv_dim, out_dim=dim, groups=resnet_groups, use_gca=True),
             nn.Conv3d(in_channels=dim, out_channels=self.out_channels, kernel_size=1),
         )
 
@@ -724,9 +799,17 @@ class Unet3dVd(nn.Module):
 
         x = self.middle_stage.forward(x, pos_bias=time_rel_pos_bias)
 
+        fmaps = []
         for stage in self.decoder_stages:
             stage = cast(DecoderStage, stage)
-            x = stage.forward(x, skip_connections=skip_connections, pos_bias=time_rel_pos_bias)
+            x, fmap = stage.forward(
+                x, skip_connections=skip_connections, pos_bias=time_rel_pos_bias
+            )
+            fmaps.append(fmaps)
+
+        # whether to combine all feature maps from upsample blocks
+        if some(self.upsample_combiner):
+            x = self.upsample_combiner.forward(x, fmaps=fmaps)
 
         x = torch.cat((x, init_conv_residual), dim=1)
         # temporal pooling

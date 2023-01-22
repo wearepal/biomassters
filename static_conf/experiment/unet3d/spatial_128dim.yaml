@@ -27,9 +27,10 @@ alg:
   lr: 3e-4
   weight_decay: 0.0
   test_on_best: false
-  loss_fn: null
-    # _target_: torch.nn.HuberLoss
-    # delta: 1.0
+  loss_fn: 
+    # null
+    _target_: torch.nn.HuberLoss
+    delta: 1.0
     # _target_: src.loss.CharbonnierLoss
     # alpha: 2
   optimizer_cls: deepspeed.ops.adam.FusedAdam
