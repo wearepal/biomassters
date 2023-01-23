@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 import shutil
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Final, List, Tuple
 import warnings
 
 from PIL import Image
@@ -25,6 +25,8 @@ __all__ = ["EnsembleRelay"]
 
 warnings.filterwarnings("ignore", category=rasterio.errors.NotGeoreferencedWarning)
 
+TARGET_SHAPE: Final[Tuple[int, int]] = (SentinelDataset.RESOLUTION, SentinelDataset.RESOLUTION)
+
 
 def _load_tif(tif_path: Path) -> npt.NDArray[np.float32]:
     with rasterio.open(tif_path, driver="GTiff") as src:
@@ -33,20 +35,20 @@ def _load_tif(tif_path: Path) -> npt.NDArray[np.float32]:
 
 
 def _load_ensemble_save(*, source_dirs: List[Path], chip: str, output_dir: Path) -> None:
-    merged_np = None
+    ensembled_np = None
     for dir in source_dirs:
         fp = dir / f"{chip}_agbm.tif"
         tif = _load_tif(fp)
-        if some(merged_np):
-            merged_np += tif
+        if some(ensembled_np):
+            ensembled_np += tif
         else:
-            merged_np = tif
-    assert some(merged_np)
-    merged_np /= len(source_dirs)
-    merged_np = merged_np.reshape((SentinelDataset.RESOLUTION, SentinelDataset.RESOLUTION))
-    merged_pil = Image.fromarray(merged_np)
+            ensembled_np = tif
+    assert some(ensembled_np)
+    ensembled_np /= len(source_dirs)
+    ensembled_np = ensembled_np.reshape(TARGET_SHAPE)
+    ensembled_pil = Image.fromarray(ensembled_np)
     save_path = output_dir / f"{chip}_agbm.tif"
-    merged_pil.save(save_path, format="TIFF", save_all=True)
+    ensembled_pil.save(save_path, format="TIFF", save_all=True)
 
 
 @dataclass(unsafe_hash=True)
@@ -58,20 +60,6 @@ class EnsembleRelay(Relay):
     )
     n_jobs: int = 1
     archive: bool = False
-
-    @classmethod
-    @override
-    def with_hydra(
-        cls,
-        root: Union[Path, str],
-        *,
-        clear_cache: bool = False,
-    ) -> None:
-        super().with_hydra(
-            root=root,
-            instantiate_recursively=False,
-            clear_cache=clear_cache,
-        )
 
     def __post_init__(self) -> None:
         self.output_dir.mkdir(exist_ok=False, parents=True)
