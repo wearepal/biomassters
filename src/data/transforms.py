@@ -694,11 +694,11 @@ def _apply_along_time_axis(
     elif "label" in inputs:
         inputs = cast(TrainSample, inputs)
         x_t = inputs["image"].transpose(0, 1)
-        xy = torch.cat((x_t, inputs["label"].expand(x_t.size(1), -1, -1)[None]), dim=0)
-        xy_tformed = fn(xy)
-        x_tformed, y_tformed = xy_tformed.split(len(x_t))
+        x_tformed = fn(x_t)
+        y_tform_params = {k: v[0:1] for k, v in fn._params.items()}
+        y_tformed = fn(inputs["label"], params=y_tform_params)
         inputs["image"] = x_tformed.transpose(0, 1)
-        inputs["label"] = y_tformed.squeeze(0)[0]
+        inputs["label"] = y_tformed
     else:
         inputs["image"] = fn(inputs["image"].transpose(0, 1)).transpose(0, 1)
     return inputs
