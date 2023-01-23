@@ -1,31 +1,25 @@
 from dataclasses import dataclass
-from src.utils import to_targz
-from loguru import logger
-import shutil
-from typing_extensions import override
 from functools import partial
 from pathlib import Path
-from typing import List
+import shutil
+from typing import Any, Dict, List, Union
 import warnings
 
 from PIL import Image
 import joblib  # type: ignore
+from loguru import logger
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from ranzen.hydra import Relay
 import rasterio  # type: ignore
 import rasterio.errors  # type: ignore
 from tqdm import tqdm
+from typing_extensions import override
+
 from src.data.dataset import SentinelDataset
-
 from src.logging import tqdm_joblib
-from src.utils import some
-from pathlib import Path
-from typing import Any, Dict, Optional, Union
-
-from ranzen.hydra import Relay
-from torch.types import Number
-
+from src.utils import some, to_targz
 
 __all__ = ["EnsembleRelay"]
 
@@ -83,8 +77,8 @@ class EnsembleRelay(Relay):
         self.output_dir.mkdir(exist_ok=False, parents=True)
 
     @override
-    def run(self, raw_config: Dict[str, Any]) -> Optional[Number]:
-        chips = pd.read_csv(self.metadata_fp)["chip"].to_numpy().tolist()
+    def run(self, raw_config: Dict[str, Any]) -> None:
+        chips = pd.read_csv(self.metadata_fp)["chip"].tolist()
         fn = partial(_load_ensemble_save, source_dirs=self.source_dirs, output_dir=self.output_dir)
         try:
             with tqdm_joblib(tqdm(desc="Ensembling predictions", total=len(chips))):
