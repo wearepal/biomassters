@@ -7,7 +7,7 @@ import torch.multiprocessing
 
 from src.algorithms import Erm
 from src.models import Unet3dImagenFn, Unet3dVdFn, UnetFn, UnetPlusPlusFn
-from src.relay import SentinelRelay
+from src.relays import SentinelRelay
 
 T = TypeVar("T")
 

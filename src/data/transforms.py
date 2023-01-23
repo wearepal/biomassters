@@ -48,6 +48,9 @@ __all__ = [
     "OneOf",
     "Permute",
     "RandomCrop",
+    "RandomErasing",
+    "RandomGaussianBlur",
+    "RandomGaussianNoise",
     "RandomHorizontalFlip",
     "RandomResizedCrop",
     "RandomRotation",
@@ -691,11 +694,11 @@ def _apply_along_time_axis(
     elif "label" in inputs:
         inputs = cast(TrainSample, inputs)
         x_t = inputs["image"].transpose(0, 1)
-        xy = torch.cat((x_t, inputs["label"][None]), dim=0)
+        xy = torch.cat((x_t, inputs["label"].expand(x_t.size(1), -1, -1)[None]), dim=0)
         xy_tformed = fn(xy)
         x_tformed, y_tformed = xy_tformed.split(len(x_t))
         inputs["image"] = x_tformed.transpose(0, 1)
-        inputs["label"] = y_tformed.squeeze(0)
+        inputs["label"] = y_tformed.squeeze(0)[0]
     else:
         inputs["image"] = fn(inputs["image"].transpose(0, 1)).transpose(0, 1)
     return inputs
@@ -730,10 +733,6 @@ class ColorJiggle(InputTransform):
         # inputs are assumed to be in CFHW format (no batch dim)
         if not self.inplace:
             inputs["image"] = inputs["image"].clone()
-        # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W) --
-        # we treat the frame (F) dim as the batch dim, tranposing it to the 0th
-        # dimension and then reversing the transposition after the transform has
-        # been applied.
         transformed = _apply_along_time_axis(inputs=inputs["image"][self.rgb_dims], fn=self.fn)
         inputs["image"][self.rgb_dims] = transformed
         return inputs
@@ -847,3 +846,73 @@ class ResizeBoth(_Resize, TargetTransform):
     @override
     def __call__(self, inputs: TrainSample) -> TrainSample:
         return _apply_along_time_axis(inputs=inputs, fn=self.fn)
+
+
+class RandomErasing(InputTransform):
+    def __init__(
+        self,
+        *,
+        scale: Tuple[float, float] = (0.02, 0.33),
+        ratio: Tuple[float, float] = (0.3, 3.3),
+        value: float = 0.0,
+        p: float = 0.5,
+    ) -> None:
+        self.fn = K.RandomErasing(
+            scale=scale,
+            ratio=ratio,
+            value=value,
+            p=1.0,
+            same_on_batch=True,
+            keepdim=True,
+        )
+        self.p = p
+
+    def __call__(self, inputs: S) -> S:
+        if should_apply(self.p):
+            inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
+        return inputs
+
+
+class RandomGaussianNoise(InputTransform):
+    def __init__(
+        self,
+        *,
+        mean: float = 0,
+        std: float = 1.0,
+        p: float = 0.5,
+    ) -> None:
+        self.fn = K.RandomGaussianNoise(
+            mean=mean,
+            std=std,
+            p=1.0,
+            keepdim=True,
+        )
+        self.p = p
+
+    def __call__(self, inputs: S) -> S:
+        if should_apply(self.p):
+            inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
+        return inputs
+
+
+class RandomGaussianBlur(InputTransform):
+    def __init__(
+        self,
+        *,
+        kernel_size: Tuple[int, int] = (3, 3),
+        sigma: Tuple[float, float] = (0.1, 2.0),
+        p: float = 0.5,
+    ) -> None:
+        self.fn = K.RandomGaussianBlur(
+            kernel_size=kernel_size,
+            sigma=sigma,
+            p=1.0,
+            keepdim=True,
+            same_on_batch=True,
+        )
+        self.p = p
+
+    def __call__(self, inputs: S) -> S:
+        if should_apply(self.p):
+            inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
+        return inputs

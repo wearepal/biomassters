@@ -12,7 +12,7 @@ trainer:
   precision: 16
   accelerator: gpu
   devices: 4
-  max_steps: ${eval:'30000 * ${trainer.accumulate_grad_batches}'}
+  max_steps: ${eval:'int(3e4 * ${trainer.accumulate_grad_batches})'}
   strategy: 
     _target_: pytorch_lightning.strategies.DeepSpeedStrategy
     stage: 2
@@ -20,7 +20,8 @@ trainer:
     offload_parameters: false
     min_loss_scale: 0.1
 
-  val_check_interval: ${eval:'500 * ${trainer.accumulate_grad_batches}'}
+  val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
+  # val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
   gradient_clip_val: 100
 
 alg:
@@ -42,7 +43,8 @@ alg:
   #   eta_min: 5.0e-7
   scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
   scheduler_kwargs:
-    warmup_iters: ${eval:'2000 * ${trainer.accumulate_grad_batches}'}
+    warmup_iters: ${eval:'int(2e3 * ${trainer.accumulate_grad_batches})'}
+    # warmup_iters: ${eval:'${trainer.max_steps} // 15'}
     total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
     lr_min: 5.0e-7
 
