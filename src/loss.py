@@ -6,10 +6,13 @@ from torch import Tensor
 import torch.nn as nn
 from typing_extensions import override
 
+from src.utils import torch_eps
+
 __all__ = [
     "CharbonnierLoss",
     "QuantileLoss",
     "stable_mse_loss",
+    "CCCLoss",
 ]
 
 
@@ -73,4 +76,42 @@ class CharbonnierLoss(nn.Module):
     @override
     def forward(self, input: Tensor, *, target: Tensor) -> Tensor:
         losses = ((input - target).pow(2) + self.eps_sq).pow(self.exponent)
+        return reduce(losses=losses, reduction_type=self.reduction)
+
+
+class CCCLoss(nn.Module):
+    r"""
+    Loss based on (Lin's) Concordance Correlation Coefficient.
+
+    The concordance correlation coefficient measures the agreement between two
+    variables, e.g., to evaluate reproducibility or for inter-rater
+    reliability.
+
+    The coefficient takes the form:
+
+      .. math::
+          \frac{2 \rho  \sigma_x \sigma_y}{\sigma_x^2 + \sigma_y^2 + (\mu_x - \mu_y)^2}
+
+    and ranges between -1 (denoting perfect discordance) and +1 (denoting perfect concordance).
+    """
+
+    def __init__(
+        self,
+        *,
+        reduction: ReductionType = ReductionType.mean,
+    ) -> None:
+        self.reduction = reduction
+
+    @override
+    def forward(self, input: Tensor, *, target: Tensor) -> Tensor:
+        mean_x = input.mean(keepdim=True, dim=1)
+        resid_x = input - mean_x
+        var_x = resid_x.pow(2).mean(dim=1)
+        mean_y = target.mean(keepdim=True, dim=1)
+        resid_y = target - mean_y
+        var_y = resid_y.pow(2).mean(dim=1)
+        covar = (resid_x * resid_y).mean(dim=1)
+        denom = var_x + var_y + (mean_x - mean_y).pow(2)
+        ccc = 2 * covar / denom.clamp_min(torch_eps(input))
+        losses = ccc.neg()
         return reduce(losses=losses, reduction_type=self.reduction)

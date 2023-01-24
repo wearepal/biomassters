@@ -1,5 +1,15 @@
 from functools import partial
-from typing import Any, Dict, Generic, List, Literal, Type, TypeVar, get_type_hints
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Literal,
+    Type,
+    TypeVar,
+    get_type_hints,
+)
 
 from torch import Tensor
 from typing_extensions import TypeAlias, TypedDict, TypeGuard
@@ -52,3 +62,4 @@ def is_td_instance(dict_: Dict[str, Any], cls_: Type[TD], *, strict: bool = Fals
 is_image_sample = partial(is_td_instance, cls_=ImageSample)
 is_test_sample = partial(is_td_instance, cls_=TestSample)
 is_train_sample = partial(is_td_instance, cls_=TrainSample)
+LossClosure: TypeAlias = Callable[..., Tensor]
