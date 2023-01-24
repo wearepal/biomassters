@@ -448,6 +448,17 @@ files = [
 ]
 
 [[package]]
+name = "dadaptation"
+version = "1.3"
+description = "Learning Rate Free Learning for Adam, SGD and AdaGrad"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "dadaptation-1.3.tar.gz", hash = "sha256:21feb88b6b0952e4cf2f2476b0d855058b54402a1ca990b7b44b888560bcd1c9"},
+]
+
+[[package]]
 name = "darglint"
 version = "1.8.1"
 description = "A utility for ensuring Google-style docstrings stay up to date with the source code."
@@ -3652,4 +3663,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.11,<3.11"
-content-hash = "b50fba1b81e2deffe99e74be56c125c4a2dc247954a0e5dd3a532f77c4ada252"
+content-hash = "22f1869a887e0318620456d3cbe0fd9ea51718651bfdb4677b9e2a25a77b3cd4"

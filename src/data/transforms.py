@@ -726,15 +726,18 @@ class ColorJiggle(InputTransform):
             saturation=saturation,
             hue=hue,
             same_on_batch=same_on_batch,
+            p=1.0,
+            keepdim=True,
         )
 
     @override
     def __call__(self, inputs: S) -> S:
-        # inputs are assumed to be in CFHW format (no batch dim)
-        if not self.inplace:
-            inputs["image"] = inputs["image"].clone()
-        transformed = _apply_along_time_axis(inputs=inputs["image"][self.rgb_dims], fn=self.fn)
-        inputs["image"][self.rgb_dims] = transformed
+        if should_apply(self.p):
+            # inputs are assumed to be in CFHW format (no batch dim)
+            if not self.inplace:
+                inputs["image"] = inputs["image"].clone()
+            transformed = _apply_along_time_axis(inputs=inputs["image"][self.rgb_dims,], fn=self.fn)
+            inputs["image"][self.rgb_dims,] = transformed
         return inputs
 
 
