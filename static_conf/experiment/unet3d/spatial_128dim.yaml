@@ -18,7 +18,7 @@ trainer:
     stage: 2
     offload_optimizer: false
     offload_parameters: false
-    min_loss_scale: 0.1
+    min_loss_scale: 1.0
 
   val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
   # val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
@@ -26,27 +26,29 @@ trainer:
 
 alg:
   pred_dir: /srv/galene0/shared/data/biomassters/predictions/unet3d/${EPOCHSECONDS}
-  lr: 3e-4
-  weight_decay: 0.0
   test_on_best: false
   loss_fn: 
     _target_: torch.nn.HuberLoss
     delta: 1.0
   # optimizer_cls: deepspeed.ops.adam.FusedAdam
   # optimizer_cls: torch.optim.AdamW
-  optimizer_cls: src.optimizers.Adafactor
+  # optimizer_cls: src.optimizers.Adafactor
+  optimizer_cls: dadaptation.dadapt_adam.DAdaptAdam
   # optimizer_cls: bitsandbytes.optim.Adam8bit
+  lr: 1.0
+  weight_decay: 0.0
+
   lr_sched_freq: 1
   # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
   # scheduler_kwargs:
   #   T_max: ${ trainer.max_steps }
   #   eta_min: 5.0e-7
-  scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
-  scheduler_kwargs:
-    warmup_iters: ${eval:'int(2e3 * ${trainer.accumulate_grad_batches})'}
-    # warmup_iters: ${eval:'${trainer.max_steps} // 15'}
-    total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
-    lr_min: 5.0e-7
+  # scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
+  # scheduler_kwargs:
+  #   warmup_iters: ${eval:'int(2e3 * ${trainer.accumulate_grad_batches})'}
+  #   # warmup_iters: ${eval:'${trainer.max_steps} // 15'}
+  #   total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
+  #   lr_min: 5.0e-7
 
 dm:
   num_workers: 24
