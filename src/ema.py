@@ -2,7 +2,7 @@ import contextlib
 import copy
 import os
 import threading
-from typing import Any, Dict, Iterable, List, Optional, Tuple, TypeGuard
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pytorch_lightning
 import pytorch_lightning as pl
@@ -16,9 +16,8 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_info  # type: ignore
 import torch
 from torch import Tensor
 from torch.optim import Optimizer
-from typing_extensions import override
+from typing_extensions import TypeGuard, override
 
-from src.ema import EMA
 from src.types import LossClosure
 from src.utils import some
 
@@ -227,7 +226,7 @@ class EMAOptimizer(torch.optim.Optimizer):
         self,
         optimizer: torch.optim.Optimizer,
         *,
-        device: torch.device = torch.device("cpu"),
+        device: torch.device,
         decay: float = 0.9999,
         every_n_steps: int = 1,
         current_step: int = 0,
@@ -393,7 +392,7 @@ class EMACheckpointer(ModelCheckpoint):
     @override
     def _save_checkpoint(self, trainer: "pytorch_lightning.Trainer", filepath: str) -> None:
         ema_callback = self._ema_callback(trainer)
-        if ema_callback is not None:
+        if some(ema_callback):
             with ema_callback.save_original_optimizer_state(trainer):
                 super()._save_checkpoint(trainer, filepath)
 

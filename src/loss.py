@@ -100,6 +100,7 @@ class CCCLoss(nn.Module):
         *,
         reduction: ReductionType = ReductionType.mean,
     ) -> None:
+        super().__init__()
         self.reduction = reduction
 
     @override
@@ -113,5 +114,5 @@ class CCCLoss(nn.Module):
         covar = (resid_x * resid_y).mean(dim=1)
         denom = var_x + var_y + (mean_x - mean_y).pow(2)
         ccc = 2 * covar / denom.clamp_min(torch_eps(input))
-        losses = ccc.neg()
+        losses = 1 - ccc
         return reduce(losses=losses, reduction_type=self.reduction)

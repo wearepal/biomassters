@@ -70,21 +70,6 @@ class RelativePositionBias(nn.Module):
         return rearrange(values, "i j h -> h i j")
 
 
-class SinusoidalPosEmb(nn.Module):
-    def __init__(self, dim: int) -> None:
-        super().__init__()
-        self.dim = dim
-
-    @override
-    def forward(self, x: Tensor) -> Tensor:
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=x.device) * -emb)
-        emb = x[:, None] * emb[None, :]
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
-
-
 def up_conv(dim: int) -> nn.ConvTranspose3d:
     return nn.ConvTranspose3d(
         in_channels=dim,
@@ -119,20 +104,6 @@ class PreNorm(nn.Module):
 
 
 # building block modules
-
-
-class Block2d(nn.Module):
-    def __init__(self, in_dim: int, *, out_dim: int, groups: int = 8) -> None:
-        super().__init__()
-        self.proj = nn.Conv2d(in_dim, out_channels=out_dim, kernel_size=(3, 3), padding=(1, 1))
-        self.norm = nn.GroupNorm(groups, num_channels=out_dim)
-        self.act = nn.SiLU()
-
-    @override
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.proj(x)
-        x = self.norm(x)
-        return self.act(x)
 
 
 class Block3d(nn.Module):
@@ -357,13 +328,10 @@ class UpsampleCombiner(nn.Module):
 
     @override
     def forward(self, x: Tensor, *, fmaps: Optional[Sequence[Tensor]] = None) -> Tensor:
-        target_size = x.shape[-1]
-
+        target_size = x.size(-1)
         fmaps = unwrap_or(fmaps, default=())
-
         if (len(fmaps) == 0) or (len(self.fmap_convs) == 0):
             return x
-
         fmaps = [resize_video_to(fmap, target_image_size=target_size) for fmap in fmaps]
         outs = [conv(fmap) for fmap, conv in zip(fmaps, self.fmap_convs)]
         return torch.cat((x, *outs), dim=1)
@@ -445,15 +413,15 @@ class EncoderStage(nn.Module):
     def forward(self, x: Tensor, *, pos_bias: Tensor) -> Tuple[Tensor, List[Tensor]]:
         x = self.pre_downsample(x)
         x = self.init_rn_block(x)
-        shortcuts = []
+        skip_connections = []
         for block in self.rn_blocks:
             block = cast(nn.Sequential, block)
             x = block.forward(x)
-            shortcuts.append(x)
+            skip_connections.append(x)
         x = self.spatial_attn(x)
         x = self.temporal_attn(x, pos_bias=pos_bias)
-        shortcuts.append(self.final_pool.forward(x))
-        return self.post_downsample(x), shortcuts
+        skip_connections.append(self.final_pool.forward(x))
+        return self.post_downsample(x), skip_connections
 
 
 def _add_skip_connection(

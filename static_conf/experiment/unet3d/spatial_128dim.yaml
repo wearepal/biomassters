@@ -31,18 +31,11 @@ alg:
     _target_: torch.nn.HuberLoss
     delta: 1.0
   # optimizer_cls: deepspeed.ops.adam.FusedAdam
-  # optimizer_cls: torch.optim.AdamW
-  # optimizer_cls: src.optimizers.Adafactor
-  optimizer_cls: dadaptation.dadapt_adam.DAdaptAdam
-  # optimizer_cls: bitsandbytes.optim.Adam8bit
-  lr: 1.0
+  optimizer_cls: src.optimizers.Adafactor
+  lr: 3.e-4
   weight_decay: 0.0
 
   lr_sched_freq: 1
-  # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
-  # scheduler_kwargs:
-  #   T_max: ${ trainer.max_steps }
-  #   eta_min: 5.0e-7
   # scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
   # scheduler_kwargs:
   #   warmup_iters: ${eval:'int(2e3 * ${trainer.accumulate_grad_batches})'}

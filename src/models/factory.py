@@ -85,7 +85,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     dim_mults: Tuple[int, ...] = (1, 2, 4, 8)
     init_dim: Optional[int] = None
     init_kernel_size: int = 7
-    max_distance: int = 32
+    max_distance: int = 11
     memory_efficient: bool = False
     num_attn_heads: int = 8
     num_resnet_blocks: int = 1

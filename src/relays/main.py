@@ -1,13 +1,12 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from conduit.progress import CdtProgressBar
 from hydra.utils import instantiate
 import loguru
 from omegaconf import DictConfig
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers.wandb import WandbLogger
 from ranzen.hydra import Option, Options, Relay
 import torch.nn as nn
@@ -17,7 +16,9 @@ from typing_extensions import override
 from src.algorithms.base import Algorithm
 from src.conf import WandbLoggerConf
 from src.data import DenormalizeModule, SentinelDataModule
+from src.ema import EMA, EMACheckpointer
 from src.models import ModelFactory
+from src.utils import some
 
 __all__ = ["SentinelRelay"]
 
@@ -35,6 +36,9 @@ class SentinelRelay(Relay):
     seed: Optional[int] = 0
     progbar_theme: CdtProgressBar.Theme = CdtProgressBar.Theme.CYBERPUNK
 
+    ema_decay: Optional[float] = None
+    offload_ema: bool = True
+
     @classmethod
     @override
     def with_hydra(
@@ -47,7 +51,7 @@ class SentinelRelay(Relay):
     ) -> None:
         configs = dict(
             alg=alg,
-            checkpointer=[Option(class_=ModelCheckpoint, name="base")],
+            checkpointer=[Option(class_=EMACheckpointer, name="base")],
             dm=[Option(class_=SentinelDataModule, name="base")],
             logger=[Option(class_=WandbLoggerConf, name="base")],
             model=model,
@@ -84,8 +88,11 @@ class SentinelRelay(Relay):
         logger: WandbLogger = instantiate(self.logger, reinit=False)
         logger.log_hyperparams(raw_config)  # type: ignore
         progbar = CdtProgressBar(theme=self.progbar_theme)
-        checkpointer: ModelCheckpoint = instantiate(self.checkpointer)
-        trainer_callbacks = [checkpointer, progbar]
+        checkpointer: EMACheckpointer = instantiate(self.checkpointer)
+        trainer_callbacks: List[pl.Callback] = [checkpointer, progbar]
+        if some(self.ema_decay):
+            ema_callback = EMA(decay=self.ema_decay, cpu_offload=self.offload_ema)
+            trainer_callbacks.append(ema_callback)
 
         # Set up and execute the training algorithm.
         trainer: pl.Trainer = instantiate(

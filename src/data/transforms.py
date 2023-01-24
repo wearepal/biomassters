@@ -736,8 +736,15 @@ class ColorJiggle(InputTransform):
             # inputs are assumed to be in CFHW format (no batch dim)
             if not self.inplace:
                 inputs["image"] = inputs["image"].clone()
-            transformed = _apply_along_time_axis(inputs=inputs["image"][self.rgb_dims,], fn=self.fn)
-            inputs["image"][self.rgb_dims,] = transformed
+            transformed = _apply_along_time_axis(
+                inputs=inputs["image"][
+                    self.rgb_dims,
+                ],
+                fn=self.fn,
+            )
+            inputs["image"][
+                self.rgb_dims,
+            ] = transformed
         return inputs
 
 
@@ -883,18 +890,19 @@ class RandomGaussianNoise(InputTransform):
         mean: float = 0,
         std: float = 1.0,
         p: float = 0.5,
+        same_on_batch: bool = True,
     ) -> None:
         self.fn = K.RandomGaussianNoise(
             mean=mean,
             std=std,
-            p=1.0,
+            p=p,
             keepdim=True,
+            same_on_batch=same_on_batch,
         )
         self.p = p
 
     def __call__(self, inputs: S) -> S:
-        if should_apply(self.p):
-            inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
+        inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
         return inputs
 
 
@@ -905,17 +913,17 @@ class RandomGaussianBlur(InputTransform):
         kernel_size: Tuple[int, int] = (3, 3),
         sigma: Tuple[float, float] = (0.1, 2.0),
         p: float = 0.5,
+        same_on_batch: bool = False,
     ) -> None:
         self.fn = K.RandomGaussianBlur(
             kernel_size=kernel_size,
             sigma=sigma,
-            p=1.0,
+            p=p,
             keepdim=True,
-            same_on_batch=True,
+            same_on_batch=same_on_batch,
         )
         self.p = p
 
     def __call__(self, inputs: S) -> S:
-        if should_apply(self.p):
-            inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
+        inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
         return inputs
