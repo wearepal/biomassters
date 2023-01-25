@@ -590,17 +590,18 @@ def _masked_fill(input: Tensor, mask: Tensor, value: Union[float, Tensor]) -> Te
     if isinstance(value, float):
         input[mask] = value
     else:
-        input[mask] = 0.0 # dummy value
+        input[mask] = 0.0  # dummy value
         value = value.view(-1, *((1,) * (input.ndim - 1)))
         input = mask * value + (~mask) * input
     return input
+
 
 class NanToNum(InputTransform):
     def __init__(
         self,
         *,
         posinf: Optional[List[float]] = None,
-        neginf: Optional[List[float]]  = None,
+        neginf: Optional[List[float]] = None,
         nan: Optional[List[float]] = None,
         inplace: bool = True,
     ) -> None:
@@ -636,6 +637,7 @@ class NanToNum(InputTransform):
             image = _masked_fill(input=image, mask=mask, value=self.neginf)
         inputs["image"] = image
         return inputs
+
 
 class ClampInput(InputTransform):
     def __init__(
