@@ -890,7 +890,7 @@ class RandomGaussianNoise(InputTransform):
         mean: float = 0,
         std: float = 1.0,
         p: float = 0.5,
-        same_on_batch: bool = True,
+        same_on_batch: bool = False,
     ) -> None:
         self.fn = K.RandomGaussianNoise(
             mean=mean,
