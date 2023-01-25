@@ -11,12 +11,14 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 from ranzen.hydra import Option, Options, Relay
 import torch.nn as nn
 from torch.types import Number
-from typing_extensions import override
+from typing_extensions import override  # type: ignore
 
 from src.algorithms.base import Algorithm
 from src.conf import WandbLoggerConf
 from src.data import DenormalizeModule, SentinelDataModule
-from src.ema import EMA, EMACheckpointer
+
+# from src.ema import EMA, EMACheckpointer
+from src.ema2 import EMA, EMACheckpointer
 from src.models import ModelFactory
 from src.utils import some
 
@@ -38,6 +40,7 @@ class SentinelRelay(Relay):
 
     ema_decay: Optional[float] = None
     offload_ema: bool = True
+    ema_update_freq: int = 1
 
     @classmethod
     @override
@@ -91,7 +94,11 @@ class SentinelRelay(Relay):
         checkpointer: EMACheckpointer = instantiate(self.checkpointer)
         trainer_callbacks: List[pl.Callback] = [checkpointer, progbar]
         if some(self.ema_decay):
-            ema_callback = EMA(decay=self.ema_decay, cpu_offload=self.offload_ema)
+            ema_callback = EMA(
+                decay=self.ema_decay,
+                cpu_offload=self.offload_ema,
+                every_n_steps=self.ema_update_freq,
+            )
             trainer_callbacks.append(ema_callback)
 
         # Set up and execute the training algorithm.

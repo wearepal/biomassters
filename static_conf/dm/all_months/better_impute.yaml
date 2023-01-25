@@ -60,6 +60,17 @@ train_transforms:
       - 3.2280e+03
       - 3.2258e+03
 
+    - _target_: src.data.transforms.RandomGaussianBlur
+      p: 0.2
+      kernel_size: ${tuple:3,3}
+      sigma: ${tuple:0.1,2.0}
+      same_on_batch: false
+
+    - _target_: src.data.transforms.RandomGaussianNoise
+      p: 0.2
+      std: 0.1
+
+
     - _target_: src.data.transforms.RandomHorizontalFlip
       p: 0.5
 

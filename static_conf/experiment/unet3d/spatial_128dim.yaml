@@ -20,8 +20,8 @@ trainer:
     offload_parameters: false
     min_loss_scale: 1.0
 
-  val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
-  # val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
+  # val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
+  val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
   gradient_clip_val: 100
 
 alg:
@@ -39,7 +39,7 @@ alg:
   scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
   scheduler_kwargs:
     # warmup_iters: ${eval:'int(2e3 * ${trainer.accumulate_grad_batches})'}
-    warmup_iters: ${eval:'${trainer.max_steps} // 15'}
+    warmup_iters: ${eval:'${trainer.max_steps} // 20'}
     total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
     lr_min: 5.0e-7
 

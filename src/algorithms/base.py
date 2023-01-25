@@ -217,7 +217,7 @@ class Algorithm(pl.LightningModule):
             except ValueError:
                 trainer.predict(model=self, datamodule=dm)
 
-            # self._archive_predictions()
+        # self._archive_predictions()
 
         return self
 

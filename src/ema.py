@@ -170,8 +170,9 @@ class EMA(Callback):
 
 
 @torch.no_grad()
+@torch.no_grad()
 def ema_update(
-    ema_model_tuple: Tuple[Tensor], current_model_tuple: Tuple[Tensor], decay: float
+    ema_model_tuple: Tuple[Tensor, ...], current_model_tuple: Tuple[Tensor, ...], decay: float
 ) -> None:
     torch._foreach_mul_(ema_model_tuple, decay)
     torch._foreach_add_(
@@ -181,8 +182,13 @@ def ema_update(
     )
 
 
-def run_ema_update_cpu(ema_model_tuple, current_model_tuple, decay, pre_sync_stream=None):
-    if pre_sync_stream is not None:
+def run_ema_update_cpu(
+    ema_model_tuple: Tuple[Tensor, ...],
+    current_model_tuple: Tuple[Tensor, ...],
+    decay: float,
+    pre_sync_stream: Optional[torch.cuda.Stream] = None,
+) -> None:
+    if some(pre_sync_stream):
         pre_sync_stream.synchronize()
 
     ema_update(ema_model_tuple, current_model_tuple, decay)

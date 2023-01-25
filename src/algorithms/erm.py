@@ -31,6 +31,7 @@ class Erm(Algorithm):
         scheduler_kwargs: Optional[DictConfig] = None,
         lr_sched_freq: int = 1,
         test_on_best: bool = False,
+        predict_with_best: bool = True,
         loss_fn: Optional[_Loss] = None,
         ckpt_path: Optional[Path] = None,
         pred_dir: Optional[Path] = None,
@@ -44,6 +45,7 @@ class Erm(Algorithm):
             scheduler_kwargs=scheduler_kwargs,
             lr_sched_freq=lr_sched_freq,
             test_on_best=test_on_best,
+            predict_with_best=predict_with_best,
             ckpt_path=ckpt_path,
             pred_dir=pred_dir,
         )
