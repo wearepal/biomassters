@@ -586,28 +586,55 @@ class Flatten(InputTransform):
         return inputs
 
 
+def _masked_fill(input: Tensor, mask: Tensor, value: Union[float, Tensor]) -> Tensor:
+    if isinstance(value, float):
+        input[mask] = value
+    else:
+        input[mask] = 0.0 # dummy value
+        value = value.view(-1, *((1,) * (input.ndim - 1)))
+        input = mask * value + (~mask) * input
+    return input
+
 class NanToNum(InputTransform):
     def __init__(
         self,
         *,
-        nan: Optional[float] = None,
-        posinf: Optional[float] = None,
-        neginf: Optional[float] = None,
+        nan: Optional[List[float]] = None,
+        posinf: Optional[List[float]] = None,
+        neginf: Optional[List[float]]  = None,
         inplace: bool = True,
     ) -> None:
-        self.nan = nan
-        self.posinf = posinf
-        self.neginf = neginf
+        if isinstance(nan, list):
+            self.nan = torch.as_tensor(nan, dtype=torch.float32)
+        else:
+            self.nan = nan
+        if isinstance(posinf, list):
+            self.posinf = torch.as_tensor(posinf, dtype=torch.float32)
+        else:
+            self.posinf = posinf
+        if isinstance(neginf, list):
+            self.neginf = torch.as_tensor(neginf, dtype=torch.float32)
+        else:
+            self.neginf = neginf
+
         self.inplace = inplace
 
     @override
     def __call__(self, inputs: S) -> S:
-        func = torch.nan_to_num_ if self.inplace else torch.nan_to_num
-        inputs["image"] = func(
-            inputs["image"], nan=self.nan, posinf=self.posinf, neginf=self.neginf
-        )
+        image = inputs["image"]
+        if not self.inplace:
+            image = image.clone()
+        if some(self.nan):
+            mask = torch.isnan(image)
+            image = _masked_fill(input=image, mask=mask, value=self.nan)
+        if some(self.posinf):
+            mask = torch.isposinf(image)
+            image = _masked_fill(input=image, mask=mask, value=self.posinf)
+        if some(self.neginf):
+            mask = torch.isneginf(image)
+            image = _masked_fill(input=image, mask=mask, value=self.neginf)
+        inputs["image"] = image
         return inputs
-
 
 class ClampInput(InputTransform):
     def __init__(
