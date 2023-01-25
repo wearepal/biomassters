@@ -20,8 +20,8 @@ trainer:
     offload_parameters: false
     min_loss_scale: 1.0
 
-  # val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
-  val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
+  val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
+  # val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
   gradient_clip_val: 100
 
 alg:

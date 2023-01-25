@@ -599,23 +599,24 @@ class NanToNum(InputTransform):
     def __init__(
         self,
         *,
-        nan: Optional[List[float]] = None,
         posinf: Optional[List[float]] = None,
         neginf: Optional[List[float]]  = None,
+        nan: Optional[List[float]] = None,
         inplace: bool = True,
     ) -> None:
-        if isinstance(nan, list):
-            self.nan = torch.as_tensor(nan, dtype=torch.float32)
-        else:
-            self.nan = nan
-        if isinstance(posinf, list):
+        # TODO: Use buffers
+        if some(posinf):
             self.posinf = torch.as_tensor(posinf, dtype=torch.float32)
         else:
-            self.posinf = posinf
-        if isinstance(neginf, list):
+            self.posinf = cast(None, posinf)
+        if some(neginf):
             self.neginf = torch.as_tensor(neginf, dtype=torch.float32)
         else:
-            self.neginf = neginf
+            self.neginf = cast(None, neginf)
+        if some(nan):
+            self.nan = torch.as_tensor(nan, dtype=torch.float32)
+        else:
+            self.nan = cast(None, nan)
 
         self.inplace = inplace
 

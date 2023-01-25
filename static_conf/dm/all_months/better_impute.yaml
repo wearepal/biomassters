@@ -85,7 +85,7 @@ eval_transforms:
         - 0.0000
         - 0.0000
         - 0.0000
-        - 255.
+        - 255.00
         - -25.0000
         - -62.4062
         - -10000.0000
@@ -124,8 +124,3 @@ eval_transforms:
       - 4.3850e+00
       - 3.2280e+03
       - 3.2258e+03
-
-    - _target_: src.data.transforms.NanToNum
-      nan: 0.0
-      posinf: 0.0
-      neginf: 0.0
