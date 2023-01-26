@@ -376,18 +376,22 @@ class EncoderStage(nn.Module):
             use_gca=use_gca,
         )
 
-        def _block(_in_dim: int):
-            return nn.Sequential(
-                ResnetBlock3d(
+        class _Block(nn.Module):
+            def __init__(self, _in_dim: int) -> None:
+                super().__init__()
+                self._rn = ResnetBlock3d(
                     in_dim=_in_dim,
                     out_dim=dim_out,
                     groups=groups,
                     use_gca=use_gca,
-                ),
-                EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity(),
-            )
+                )
+                self._pool = EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity()
 
-        self.rn_blocks = nn.ModuleList([_block(dim_out) for _ in range(num_resnet_blocks)])
+            def forward(self, _x: Tensor) -> Tuple[Tensor, Tensor]:
+                _y = self._rn.forward(_x)
+                return _y, self._pool.forward(_y)
+
+        self.rn_blocks = nn.ModuleList([_Block(dim_out) for _ in range(num_resnet_blocks)])
 
         self.spatial_attn = (
             Residual(PreNorm(dim_out, fn=SpatialLinearAttention(dim_out, heads=n_attn_heads)))
@@ -416,8 +420,8 @@ class EncoderStage(nn.Module):
         skip_connections = []
         for block in self.rn_blocks:
             block = cast(nn.Sequential, block)
-            x = block.forward(x)
-            skip_connections.append(x)
+            x, sc = block.forward(x)
+            skip_connections.append(sc)
         x = self.spatial_attn(x)
         x = self.temporal_attn(x, pos_bias=pos_bias)
         skip_connections.append(self.final_pool.forward(x))
@@ -762,9 +766,10 @@ class Unet3dVd(nn.Module):
 
     @override
     def forward(self, x: Tensor) -> Tensor:
+        f = x.size(2)
         x = self.init_conv(x)
         if isinstance(self.pos_bias, RelativePositionBias):
-            time_rel_pos_bias = self.pos_bias(x.size(2), device=x.device)
+            time_rel_pos_bias = self.pos_bias(f, device=x.device)
         else:
             x = x + self.pos_bias
             time_rel_pos_bias = None
