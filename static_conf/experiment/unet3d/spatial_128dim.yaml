@@ -20,8 +20,8 @@ trainer:
     offload_parameters: false
     min_loss_scale: 1.0
 
-  # val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
-  val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
+  val_check_interval: ${eval:'int(5e2 * ${trainer.accumulate_grad_batches})'}
+  # val_check_interval: ${eval:'1000 * ${trainer.accumulate_grad_batches}'}
   gradient_clip_val: 100
 
 alg:
@@ -33,7 +33,8 @@ alg:
   # optimizer_cls: deepspeed.ops.adam.FusedAdam
   optimizer_cls: src.optimizers.Adafactor
   lr: 3.e-4
-  weight_decay: 1.e-4
+  weight_decay: 0.0
+  # weight_decay: 1.e-2
 
   lr_sched_freq: 1
   scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup

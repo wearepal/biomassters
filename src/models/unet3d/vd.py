@@ -23,7 +23,7 @@ from .common import (
 
 __all__ = ["Unet3dVd"]
 
-# relative positional bias
+# relative positional bias à la T5
 class RelativePositionBias(nn.Module):
     def __init__(self, heads: int = 8, *, num_buckets: int = 32, max_distance: int = 128) -> None:
         super().__init__()
@@ -291,12 +291,12 @@ def resize_video_to(
     clamp_range: Optional[Tuple[int, int]] = None,
     mode: Literal["nearest", "linear", "bilinear", "bicubic"] = "bilinear",
 ) -> Tensor:
-    orig_video_size = video.shape[-1]
+    orig_video_size = video.size(-1)
 
     if orig_video_size == target_image_size:
         return video
 
-    frames = video.shape[2]
+    frames = video.size(2)
     video = rearrange(video, "b c f h w -> (b f) c h w")
 
     out = F.interpolate(video, target_image_size, mode=mode)
@@ -410,7 +410,7 @@ class EncoderStage(nn.Module):
         self.final_pool = EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity()
 
     @override
-    def forward(self, x: Tensor, *, pos_bias: Tensor) -> Tuple[Tensor, List[Tensor]]:
+    def forward(self, x: Tensor, *, pos_bias: Optional[Tensor]) -> Tuple[Tensor, List[Tensor]]:
         x = self.pre_downsample(x)
         x = self.init_rn_block(x)
         skip_connections = []
@@ -503,7 +503,7 @@ class DecoderStage(nn.Module):
 
     @override
     def forward(
-        self, x: Tensor, *, skip_connections: List[Tensor], pos_bias: Tensor
+        self, x: Tensor, *, skip_connections: List[Tensor], pos_bias: Optional[Tensor]
     ) -> Tuple[Tensor, Tensor]:
         x = _add_skip_connection(
             x, skip_connections=skip_connections, scale=self.skip_connect_scale
@@ -571,7 +571,7 @@ class MiddleStage(nn.Module):
         self.temporal_pool = EtaPool(dim, kernel_size=3) if temporal_pooling else nn.Identity()
 
     @override
-    def forward(self, x: Tensor, *, pos_bias: Tensor) -> Tensor:
+    def forward(self, x: Tensor, *, pos_bias: Optional[Tensor]) -> Tensor:
         x = self.mid_block1(x)
         x = self.mid_spatial_attn(x)
         x = self.mid_temporal_attn(x, pos_bias=pos_bias)
@@ -594,7 +594,7 @@ class Unet3dVd(nn.Module):
         init_kernel_size: int = 7,
         use_sparse_linear_attn: bool = True,
         resnet_groups: int = 8,
-        max_distance: int = 11,
+        max_distance: int = 32,
         spatial_decoder: bool = False,
         use_gca: bool = False,
         cosine_sim_attn: bool = False,
@@ -604,6 +604,8 @@ class Unet3dVd(nn.Module):
         scale_skip_connection: bool = True,
         memory_efficient: bool = False,
         combine_upsample_fmaps: bool = False,
+        rel_pos_embedding: bool = True,
+        num_frames: int = 12,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -615,8 +617,20 @@ class Unet3dVd(nn.Module):
         self.memory_efficient = memory_efficient
         self.skip_connect_scale = 1.0 if not scale_skip_connection else (2**-0.5)
 
+        # initial conv
+        init_dim = dim if init_dim is None else init_dim
+        assert init_kernel_size % 2 == 1
+
+        init_padding = init_kernel_size // 2
+        self.init_conv = nn.Conv3d(
+            in_channels=in_channels,
+            out_channels=init_dim,
+            kernel_size=(1, init_kernel_size, init_kernel_size),
+            padding=(0, init_padding, init_padding),
+        )
+
         # temporal attention and its relative positional encoding
-        rotary_emb = RotaryEmbedding(min(32, attn_head_dim))
+        rotary_emb = RotaryEmbedding(min(32, attn_head_dim)) if rel_pos_embedding else None
         temporal_attn = lambda dim: EinopsToAndFrom(
             from_einops="b c f h w",
             to_einops="b (h w) f c",
@@ -629,20 +643,11 @@ class Unet3dVd(nn.Module):
             ),
         )
 
-        self.time_rel_pos_bias = RelativePositionBias(
-            heads=num_attn_heads, max_distance=max_distance
-        )
-
-        # initial conv
-        init_dim = dim if init_dim is None else init_dim
-        assert init_kernel_size % 2 == 1
-
-        init_padding = init_kernel_size // 2
-        self.init_conv = nn.Conv3d(
-            in_channels=in_channels,
-            out_channels=init_dim,
-            kernel_size=(1, init_kernel_size, init_kernel_size),
-            padding=(0, init_padding, init_padding),
+        self.pos_bias = (
+            RelativePositionBias(heads=num_attn_heads, max_distance=max_distance)
+            if rel_pos_embedding
+            # is  [B, C, F, H, W]
+            else nn.Parameter(torch.randn(1, init_dim, num_frames, 1, 1))
         )
 
         self.init_downsampling_block = (
@@ -757,8 +762,12 @@ class Unet3dVd(nn.Module):
 
     @override
     def forward(self, x: Tensor) -> Tensor:
-        time_rel_pos_bias = self.time_rel_pos_bias(x.size(2), device=x.device)
         x = self.init_conv(x)
+        if isinstance(self.pos_bias, RelativePositionBias):
+            time_rel_pos_bias = self.pos_bias(x.size(2), device=x.device)
+        else:
+            x = x + self.pos_bias
+            time_rel_pos_bias = None
         x = self.init_temporal_attn(x, pos_bias=time_rel_pos_bias)
         init_conv_residual = x.clone()
         init_conv_residual = self.init_temporal_pool(init_conv_residual)

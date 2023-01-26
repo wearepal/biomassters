@@ -85,7 +85,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     dim_mults: Tuple[int, ...] = (1, 2, 4, 8)
     init_dim: Optional[int] = None
     init_kernel_size: int = 7
-    max_distance: int = 11
+    max_distance: int = 32
     memory_efficient: bool = False
     num_attn_heads: int = 8
     num_resnet_blocks: int = 1
@@ -96,6 +96,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
     use_gca: bool = True
     use_sparse_linear_attn: bool = False
     combine_upsample_fmaps: bool = False
+    rel_pos_embedding: bool = True
 
     @override
     def __call__(self, in_channels):
@@ -120,6 +121,7 @@ class Unet3dVdFn(ModelFactory[Unet3dVd]):
             spatial_decoder=self.spatial_decoder,
             use_gca=self.use_gca,
             use_sparse_linear_attn=self.use_sparse_linear_attn,
+            rel_pos_embedding=self.rel_pos_embedding,
         )
 
 

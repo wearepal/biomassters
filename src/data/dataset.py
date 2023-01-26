@@ -99,6 +99,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     SavePrecision: TypeAlias = SavePrecision
 
     RESOLUTION: ClassVar[int] = 256
+    NUM_FRAMES: ClassVar[int] = 12
     CHANNEL_DIM: ClassVar[int] = 0
     TEMPORAL_DIM: ClassVar[int] = 1
 

@@ -24,4 +24,4 @@ pixel_shuffle: false
 scale_skip_connection: true
 memory_efficient: false
 combine_upsample_fmaps: false
-max_distance: 11
+rel_pos_embedding: true
