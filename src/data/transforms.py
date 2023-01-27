@@ -896,20 +896,20 @@ class RandomErasing(InputTransform):
         ratio: Tuple[float, float] = (0.3, 3.3),
         value: float = 0.0,
         p: float = 0.5,
+        same_on_batch: bool = False,
     ) -> None:
         self.fn = K.RandomErasing(
             scale=scale,
             ratio=ratio,
             value=value,
-            p=1.0,
-            same_on_batch=True,
+            p=p,
+            same_on_batch=same_on_batch,
             keepdim=True,
         )
         self.p = p
 
     def __call__(self, inputs: S) -> S:
-        if should_apply(self.p):
-            inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
+        inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
         return inputs
 
 

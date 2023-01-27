@@ -26,6 +26,16 @@ train_transforms:
         - -10000.0000
         - -10000.0000
 
+    - _target_: src.data.transforms.ApplyToOpticalSlice
+      transform:
+        _target_: src.data.transforms.RandomErasing
+        p: 0.1
+        scale: ${tuple:0.02,0.33}
+        ratio: ${tuple:0.3,3.3}
+        same_on_batch: false
+      start_index: 0
+      end_index: 10
+
     - _target_: src.data.transforms.ZScoreNormalizeInput
       mean: 
       - 1630.7314
@@ -59,6 +69,18 @@ train_transforms:
       - 4.3850e+00
       - 3.2280e+03
       - 3.2258e+03
+
+
+    # - _target_: src.data.transforms.RandomErasing
+    #   p: 0.3
+    #   scale: ${tuple:0.02,0.33}
+    #   ratio: ${tuple:0.3,3.3}
+    #   same_on_batch: false
+
+    # - _target_: src.data.transforms.RandomResizedCrop
+    #   p: 1.0
+    #   size: ${tuple:256,256}
+    #   scale: ${tuple:0.25,1.0}
 
     # - _target_: src.data.transforms.RandomGaussianBlur
     #   p: 0.2

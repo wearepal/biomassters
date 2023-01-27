@@ -35,6 +35,7 @@ class Erm(Algorithm):
         loss_fn: Optional[_Loss] = None,
         ckpt_path: Optional[Path] = None,
         pred_dir: Optional[Path] = None,
+        tta: bool = False,
     ) -> None:
         super().__init__(
             lr=lr,
@@ -48,6 +49,7 @@ class Erm(Algorithm):
             predict_with_best=predict_with_best,
             ckpt_path=ckpt_path,
             pred_dir=pred_dir,
+            tta=tta,
         )
         self._loss_fn = loss_fn
 
