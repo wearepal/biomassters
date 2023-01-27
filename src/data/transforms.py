@@ -16,6 +16,7 @@ from typing import (
     runtime_checkable,
 )
 
+from einops import rearrange  # type: ignore
 import kornia.augmentation as K
 from kornia.constants import Resample
 from ranzen import gcopy
@@ -31,6 +32,8 @@ __all__ = [
     "AGBMLog1PScale",
     "AppendRatioAB",
     "ApplyToOpticalSlice",
+    "ApplyToS1",
+    "ApplyToS2",
     "ApplyToTimeSlice",
     "CenterCrop",
     "ClampInput",
@@ -325,6 +328,26 @@ class ApplyToOpticalSlice(InputTransform):
         sliced_input: ImageSample = {"image": inputs["image"][self.start_index : self.end_index]}
         inputs["image"][self.start_index : self.end_index] = self.transform(sliced_input)["image"]
         return inputs
+
+
+class ApplyToS1(ApplyToOpticalSlice):
+    def __init__(
+        self,
+        transform: InputTransform,
+        *,
+        inplace: bool = True,
+    ) -> None:
+        super().__init__(transform=transform, start_index=11, end_index=15)
+
+
+class ApplyToS2(ApplyToOpticalSlice):
+    def __init__(
+        self,
+        transform: InputTransform,
+        *,
+        inplace: bool = True,
+    ) -> None:
+        super().__init__(transform=transform, start_index=0, end_index=11)
 
 
 class ApplyToTimeSlice(InputTransform):
@@ -698,40 +721,52 @@ class RandomRotation(TargetTransform):
 
 
 @overload
-def _apply_along_time_axis(inputs: Tensor, *, fn: K.AugmentationBase2D) -> Tensor:
+def _apply_along_time_axis(
+    inputs: Tensor, *, fn: K.AugmentationBase2D, channelwise: bool = ...
+) -> Tensor:
     ...
 
 
 @overload
-def _apply_along_time_axis(inputs: TrainSample, *, fn: K.AugmentationBase2D) -> TrainSample:
+def _apply_along_time_axis(
+    inputs: TrainSample, *, fn: K.AugmentationBase2D, channelwise: bool = ...
+) -> TrainSample:
     ...
 
 
 @overload
-def _apply_along_time_axis(inputs: S, *, fn: K.AugmentationBase2D) -> S:
+def _apply_along_time_axis(inputs: S, *, fn: K.AugmentationBase2D, channelwise: bool = ...) -> S:
     ...
 
 
 def _apply_along_time_axis(
-    inputs: Union[Tensor, TrainSample, S], *, fn: K.AugmentationBase2D
+    inputs: Union[Tensor, TrainSample, S], *, fn: K.AugmentationBase2D, channelwise: bool = False
 ) -> Union[Tensor, TrainSample, S]:
     # Kornia expects the input to be of shape (C, H, W) or (B, C, H, W)
     # -- we treat the frame (F) dim as the batch dim, tranposing it to
     # the 0th (batch) dimension and then reversing the transposition
     # after the transform has been applied.
-    if isinstance(inputs, Tensor):
-        inputs = fn(inputs.transpose(0, 1)).transpose(0, 1)
-    elif "label" in inputs:
-        inputs = cast(TrainSample, inputs)
-        x_t = inputs["image"].transpose(0, 1)
-        x_tformed = fn(x_t)
-        y_tform_params = {k: v[0:1] for k, v in fn._params.items()}
-        y_tformed = fn(inputs["label"], params=y_tform_params)
-        inputs["image"] = x_tformed.transpose(0, 1)
-        inputs["label"] = y_tformed
-    else:
-        inputs["image"] = fn(inputs["image"].transpose(0, 1)).transpose(0, 1)
-    return inputs
+    einops_from = "c f h w"
+    einops_to = "(c f) 1 h w" if channelwise else "f c h w"
+    x = inputs if isinstance(inputs, Tensor) else inputs["image"]
+    c, f = x.shape[:2]
+    x_batched = rearrange(x, f"{einops_from} -> {einops_to}", c=c, f=f)
+    x_tformed = cast(Tensor, fn(x_batched))
+    x_tformed = rearrange(x_tformed, f"{einops_to} -> {einops_from}", c=c, f=f)
+    if isinstance(inputs, dict):
+        if "label" in inputs:
+            if not fn.same_on_batch:
+                raise AttributeError(
+                    "'fn' must have 'same_on_batch' enabled when being applied to "
+                    "both the input and the target (when 'inputs' is of type 'TrainSample')."
+                )
+            inputs = cast(TrainSample, inputs)
+            y_tform_params = {k: v[0:1] for k, v in fn._params.items()}
+            y_tformed = fn(inputs["label"], params=y_tform_params)
+            inputs["label"] = y_tformed
+        inputs["image"] = x_tformed
+        return inputs
+    return x_tformed
 
 
 class ColorJiggle(InputTransform):
@@ -896,20 +931,23 @@ class RandomErasing(InputTransform):
         ratio: Tuple[float, float] = (0.3, 3.3),
         value: float = 0.0,
         p: float = 0.5,
+        same_on_batch: bool = False,
+        channelwise: bool = True,
     ) -> None:
         self.fn = K.RandomErasing(
             scale=scale,
             ratio=ratio,
             value=value,
-            p=1.0,
-            same_on_batch=True,
+            p=p,
+            same_on_batch=same_on_batch,
             keepdim=True,
         )
-        self.p = p
+        self.channelwise = channelwise
 
     def __call__(self, inputs: S) -> S:
-        if should_apply(self.p):
-            inputs["image"] = _apply_along_time_axis(inputs=inputs["image"], fn=self.fn)
+        inputs["image"] = _apply_along_time_axis(
+            inputs=inputs["image"], fn=self.fn, channelwise=self.channelwise
+        )
         return inputs
 
 

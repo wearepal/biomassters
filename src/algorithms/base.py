@@ -19,6 +19,7 @@ from conduit.types import LRScheduler, Stage
 from hydra.utils import instantiate
 from omegaconf.dictconfig import DictConfig
 import pytorch_lightning as pl
+from pytorch_lightning.utilities import rank_zero_info  # type: ignore
 from pytorch_lightning.utilities.rank_zero import rank_zero_only  # type: ignore
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 from ranzen.torch.data import TrainingMode
@@ -236,8 +237,14 @@ class Algorithm(pl.LightningModule):
     def _run_internal(
         self, dm: SentinelDataModule, *, trainer: pl.Trainer, test: bool = True
     ) -> Self:
+        if some(self.ckpt_path):
+            rank_zero_info(f"Loading model weights from checkpoint '{self.ckpt_path}'")
+            state_dict = torch.load(self.ckpt_path)["state_dict"]
+            # Excise the nuisance "model" prefix
+            state_dict = {name.removeprefix("model."): param for name, param in state_dict.items()}
+            self.model.load_state_dict(state_dict)
         # Train the model
-        trainer.fit(model=self, datamodule=dm, ckpt_path=self.ckpt_path)
+        trainer.fit(model=self, datamodule=dm)
         if test:
             # Test the model if desired
             trainer.test(
@@ -283,3 +290,7 @@ class Algorithm(pl.LightningModule):
     ) -> Self:
         self._setup(dm=dm, model=model)
         return self._run_internal(dm=dm, trainer=trainer, test=test)
+
+    @override
+    def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        super().on_load_checkpoint(checkpoint)

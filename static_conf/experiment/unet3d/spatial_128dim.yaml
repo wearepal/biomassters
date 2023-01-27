@@ -38,12 +38,15 @@ alg:
   # weight_decay: 1.e-2
 
   lr_sched_freq: 1
-  scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
-  scheduler_kwargs:
-    # warmup_iters: ${eval:'int(2e3 * ${trainer.accumulate_grad_batches})'}
-    warmup_iters: ${eval:'${trainer.max_steps} // 20'}
-    total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
-    lr_min: 5.0e-7
+  # scheduler_cls: ranzen.torch.schedulers.CosineLRWithLinearWarmup
+  # # scheduler_cls: torch.optim.lr_scheduler.CosineAnnealingLR
+  # scheduler_kwargs:
+  #   # warmup_iters: ${eval:'int(2e3 * ${trainer.accumulate_grad_batches})'}
+  #   warmup_iters: ${eval:'${trainer.max_steps} // 20'}
+  #   # T_max: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
+  #   # warmup_iters: 0
+  #   total_iters: ${eval:'${trainer.max_steps} // ${trainer.accumulate_grad_batches}'}
+  #   lr_min: 5.0e-7
 
 dm:
   num_workers: 24
