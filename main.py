@@ -6,7 +6,7 @@ from ranzen.hydra import Option
 import torch.multiprocessing
 
 from src.algorithms import Erm
-from src.models import Unet3dImagenFn, Unet3dVdFn, UnetFn, UnetPlusPlusFn
+from src.models import Unet3dImagenFn, Unet3dVd2Fn, Unet3dVdFn, UnetFn, UnetPlusPlusFn
 from src.relays import SentinelRelay
 
 T = TypeVar("T")
@@ -37,6 +37,7 @@ if __name__ == "__main__":
     ]
     model_ops = [
         Option(Unet3dVdFn, "unet3d"),
+        Option(Unet3dVd2Fn, "unet3d2"),
         Option(Unet3dImagenFn, "unet3d_imagen"),
         Option(UnetFn, "unet"),
         Option(UnetPlusPlusFn, "unetpp"),
