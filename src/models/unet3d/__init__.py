@@ -1,3 +1,3 @@
 from .imagen import *
-from .vd2 import *
 from .vd import *
+from .vd_lite import *

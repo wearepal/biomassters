@@ -15,7 +15,6 @@ from src.utils import some, unwrap_or
 
 from .common import (
     ChanLayerNorm,
-    EtaPool,
     GlobalContextAttention,
     PixelShuffleUpsample,
     Residual,
@@ -24,9 +23,13 @@ from .common import (
 
 __all__ = ["Unet3dVd"]
 
-# relative positional bias à la T5
+
 class RelativePositionBias(nn.Module):
-    def __init__(self, heads: int = 8, *, num_buckets: int = 32, max_distance: int = 128) -> None:
+    """ "
+    Relative position encodings à la T5.
+    """
+
+    def __init__(self, *, heads: int = 8, num_buckets: int = 32, max_distance: int = 128) -> None:
         super().__init__()
         self.num_buckets = num_buckets
         self.max_distance = max_distance
@@ -104,9 +107,6 @@ class PreNorm(nn.Module):
         return self.fn(x, **kwargs)
 
 
-# building block modules
-
-
 class Block3d(nn.Module):
     def __init__(self, in_dim: int, *, out_dim: int, groups: int = 8) -> None:
         super().__init__()
@@ -121,15 +121,6 @@ class Block3d(nn.Module):
         x = self.proj(x)
         x = self.norm(x)
         return self.act(x)
-
-
-class Always:
-    def __init__(self, val: float) -> None:
-        super().__init__()
-        self.val = val
-
-    def __call__(self, x: Tensor) -> float:
-        return self.val
 
 
 class ResnetBlock3d(nn.Module):
@@ -273,6 +264,7 @@ class Attention(nn.Module):
 
 
 def temporal_attention(
+    *,
     dim: int,
     n_attn_heads: int,
     attn_head_dim: int,
@@ -396,7 +388,6 @@ class EncoderStage(nn.Module):
                     use_gca=use_gca,
                     sd_rate=sd_rate,
                 )
-                # self._pool = EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity()
                 self._pool = (
                     nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
                 )
@@ -425,7 +416,6 @@ class EncoderStage(nn.Module):
                 ),
             )
         )
-        # self.final_pool = EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity()
         self.final_pool = (
             nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
         )
@@ -594,7 +584,6 @@ class MiddleStage(nn.Module):
             use_gca=use_gca,
             sd_rate=sd_rate,
         )
-        # self.temporal_pool = EtaPool(dim, kernel_size=3) if temporal_pooling else nn.Identity()
         self.temporal_pool = (
             nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
         )
@@ -608,7 +597,6 @@ class MiddleStage(nn.Module):
         return x
 
 
-# model
 class Unet3dVd(nn.Module):
     def __init__(
         self,
@@ -623,7 +611,6 @@ class Unet3dVd(nn.Module):
         init_kernel_size: int = 7,
         use_sparse_linear_attn: bool = True,
         resnet_groups: int = 8,
-        max_distance: int = 32,
         spatial_decoder: bool = False,
         use_gca: bool = False,
         cosine_sim_attn: bool = False,
@@ -634,6 +621,7 @@ class Unet3dVd(nn.Module):
         memory_efficient: bool = False,
         combine_upsample_fmaps: bool = False,
         rel_pos_embedding: bool = True,
+        max_distance: int = 32,
         num_frames: int = 12,
         sd_rate: float = 0.0,
     ) -> None:
@@ -694,7 +682,7 @@ class Unet3dVd(nn.Module):
 
         self.init_temporal_attn = Residual(PreNorm(init_dim, fn=temporal_attn(init_dim)))
         self.init_temporal_pool = (
-            EtaPool(init_dim, kernel_size=3) if spatial_decoder else nn.Identity()
+            nn.AdaptiveAvgPool3d((1, None, None)) if spatial_decoder else nn.Identity()
         )
 
         # dimensions
@@ -786,7 +774,6 @@ class Unet3dVd(nn.Module):
             # dim of decoder's output + init residual dim
             final_conv_dim = dim * 2
 
-        # self.final_temporal_pool = EtaPool(final_conv_dim, kernel_size=3)
         self.final_temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
 
         # Final (2d) conv block operating on temporally-pooled features

@@ -1,6 +1,6 @@
 ---
 defaults:
-  - /schema/model: unet3d2
+  - /schema/model: unet3d
   - _self_
 dim: 128
 dim_mults: 

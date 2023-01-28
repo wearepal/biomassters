@@ -5,13 +5,13 @@ import segmentation_models_pytorch as smp  # type: ignore
 import torch.nn as nn
 from typing_extensions import override
 
-from src.models.unet3d import Unet3DImagen, Unet3dVd, Unet3dVd2
+from src.models.unet3d import Unet3DImagen, Unet3dVd, Unet3dVdLite
 
 __all__ = [
     "ModelFactory",
     "Unet3dImagenFn",
     "Unet3dVdFn",
-    "Unet3dVd2Fn",
+    "Unet3dVdLiteFn",
     "UnetFn",
     "UnetPlusPlusFn",
 ]
@@ -186,7 +186,7 @@ class Unet3dImagenFn(ModelFactory[Unet3DImagen]):
 
 
 @dataclass(unsafe_hash=True)
-class Unet3dVd2Fn(ModelFactory[Unet3dVd2]):
+class Unet3dVdLiteFn(ModelFactory[Unet3dVdLite]):
     IS_TEMPORAL: ClassVar[bool] = True
 
     apply_mid_spatial_attn: bool = True
@@ -212,7 +212,7 @@ class Unet3dVd2Fn(ModelFactory[Unet3dVd2]):
 
     @override
     def __call__(self, in_channels):
-        return Unet3dVd2(
+        return Unet3dVdLite(
             apply_mid_spatial_attn=self.apply_mid_spatial_attn,
             attn_head_dim=self.attn_head_dim,
             combine_upsample_fmaps=self.combine_upsample_fmaps,

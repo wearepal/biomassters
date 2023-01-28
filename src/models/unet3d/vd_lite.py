@@ -1,4 +1,5 @@
-# Adapted shamelessly from https://github.com/lucidrains/video-diffusion-pytorch
+# Light(er)weight version of the VD model; replaces the temporal attention with
+# 3D convolutions in all but the middle (lowest resolution) stage.
 from typing import Any, List, Literal, Optional, Sequence, Tuple, Union, cast
 
 from einops import rearrange  # type: ignore
@@ -14,14 +15,13 @@ from src.utils import some, unwrap_or
 
 from .common import (
     ChanLayerNorm,
-    EtaPool,
     GlobalContextAttention,
     PixelShuffleUpsample,
     Residual,
     cast_tuple,
 )
 
-__all__ = ["Unet3dVd2"]
+__all__ = ["Unet3dVdLite"]
 
 
 def up_conv(dim: int) -> nn.ConvTranspose3d:
@@ -57,9 +57,6 @@ class PreNorm(nn.Module):
         return self.fn(x, **kwargs)
 
 
-# building block modules
-
-
 class Block3d(nn.Module):
     def __init__(
         self, in_dim: int, *, out_dim: int, groups: int = 8, temporal: bool = True
@@ -79,15 +76,6 @@ class Block3d(nn.Module):
         x = self.proj(x)
         x = self.norm(x)
         return self.act(x)
-
-
-class Always:
-    def __init__(self, val: float) -> None:
-        super().__init__()
-        self.val = val
-
-    def __call__(self, x: Tensor) -> float:
-        return self.val
 
 
 class ResnetBlock3d(nn.Module):
@@ -280,7 +268,6 @@ class EncoderStage(nn.Module):
                     use_gca=use_gca,
                     sd_rate=sd_rate,
                 )
-                # self._pool = EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity()
                 self._pool = (
                     nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
                 )
@@ -296,7 +283,6 @@ class EncoderStage(nn.Module):
             if use_sparse_linear_attn
             else nn.Identity()
         )
-        # self.final_pool = EtaPool(dim_out, kernel_size=3) if temporal_pooling else nn.Identity()
         self.final_pool = (
             nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
         )
@@ -457,6 +443,7 @@ class Attention(nn.Module):
 
 
 def temporal_attention(
+    *,
     dim: int,
     n_attn_heads: int,
     attn_head_dim: int,
@@ -529,7 +516,6 @@ class MiddleStage(nn.Module):
             use_gca=use_gca,
             sd_rate=sd_rate,
         )
-        # self.temporal_pool = EtaPool(dim, kernel_size=3) if temporal_pooling else nn.Identity()
         self.temporal_pool = (
             nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
         )
@@ -543,7 +529,7 @@ class MiddleStage(nn.Module):
 
 
 # model
-class Unet3dVd2(nn.Module):
+class Unet3dVdLite(nn.Module):
     def __init__(
         self,
         *,
@@ -621,7 +607,7 @@ class Unet3dVd2(nn.Module):
 
         self.init_temporal_attn = Residual(PreNorm(init_dim, fn=temporal_attn(init_dim)))
         self.init_temporal_pool = (
-            EtaPool(init_dim, kernel_size=3) if spatial_decoder else nn.Identity()
+            nn.AdaptiveAvgPool3d((1, None, None)) if spatial_decoder else nn.Identity()
         )
 
         # dimensions
@@ -714,7 +700,6 @@ class Unet3dVd2(nn.Module):
             # dim of decoder's output + init residual dim
             final_conv_dim = dim * 2
 
-        # self.final_temporal_pool = EtaPool(final_conv_dim, kernel_size=3)
         self.final_temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
 
         # Final (2d) conv block operating on temporally-pooled features
