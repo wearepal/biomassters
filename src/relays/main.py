@@ -9,7 +9,6 @@ from omegaconf import DictConfig
 import pytorch_lightning as pl
 from pytorch_lightning.loggers.wandb import WandbLogger
 from ranzen.hydra import Option, Options, Relay
-import torch.nn as nn
 from torch.types import Number
 from typing_extensions import override  # type: ignore
 
@@ -19,7 +18,7 @@ from src.data import DenormalizeModule, SentinelDataModule
 
 # from src.ema import EMA, EMACheckpointer
 from src.ema2 import EMA, EMACheckpointer
-from src.models import ModelFactory
+from src.models import ModelFactory, ModelPipeline, TrainableImputer
 from src.utils import some
 
 __all__ = ["SentinelRelay"]
@@ -41,6 +40,8 @@ class SentinelRelay(Relay):
     ema_decay: Optional[float] = None
     offload_ema: bool = True
     ema_update_freq: int = 1
+    learn_imputation: bool = True
+    tie_imputation: bool = False
 
     @classmethod
     @override
@@ -76,11 +77,16 @@ class SentinelRelay(Relay):
 
         model_fn: ModelFactory = instantiate(self.model)
         model = model_fn(in_channels=dm.in_channels(model_fn.IS_TEMPORAL))
-        # Merge the temporal dimension with the channeld dimension if the
-        # model is not spatiotemporal.
-        if not model_fn.IS_TEMPORAL:
-            model = nn.Sequential(nn.Flatten(start_dim=1, end_dim=2), model)
-        model = nn.Sequential(model, DenormalizeModule(*dm.target_normalizers))
+        model = ModelPipeline(
+            imputer=TrainableImputer(None if self.tie_imputation else dm.in_channels(True))
+            if self.learn_imputation
+            else None,
+            # Merge the temporal dimension with the channeld dimension if the
+            # model is not spatiotemporal.
+            temporal=model_fn.IS_TEMPORAL,
+            model=model,
+            denorm=DenormalizeModule(*dm.target_normalizers),
+        )
 
         if self.logger.get("group", None) is None:
             default_group = "_".join(

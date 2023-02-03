@@ -25,8 +25,8 @@ TrainData: TypeAlias = SentinelDataset[LitTrue, Any]
 EvalData: TypeAlias = SentinelDataset[LitTrue, Any]
 PredData: TypeAlias = SentinelDataset[LitFalse, Any]
 
-TrainTransform: TypeAlias = Union[T.InputTransform, T.TargetTransform]
-EvalTransform: TypeAlias = T.InputTransform
+TrainTransform: TypeAlias = Union[T.InputTransformP, T.TargetTransformP]
+EvalTransform: TypeAlias = T.InputTransformP
 
 TD = TypeVar("TD", bound=Optional[EvalData])
 
@@ -57,6 +57,7 @@ class SentinelDataModule(pl.LightningDataModule):
         save_with: SentinelDataset.SaveWith = SentinelDataset.SaveWith.NP,
         missing_value: SentinelDataset.MissingValue = SentinelDataset.MissingValue.INF,
         save_precision: SentinelDataset.SavePrecision = SentinelDataset.SavePrecision.HALF,
+        train_indices: Optional[Path] = None,
         split_seed: int = 47,
         val_prop: float = 0.2,
         test_prop: Optional[float] = None,
@@ -77,6 +78,7 @@ class SentinelDataModule(pl.LightningDataModule):
         self.save_with = save_with
         self.missing_value = missing_value
         self.save_precision = save_precision
+        self.train_indices = train_indices
         self.split_seed = split_seed
         self.val_prop = val_prop
         self.test_prop = test_prop
@@ -203,6 +205,7 @@ class SentinelDataModule(pl.LightningDataModule):
             missing_value=self.missing_value,
             save_precision=self.save_precision,
             train=True,
+            indices_fp=self.train_indices,
         )
         if self.test_prop is None:
             val, train = train.random_split(self.val_prop, seed=self.split_seed)
@@ -315,7 +318,7 @@ class SentinelDataModule(pl.LightningDataModule):
     def target_normalizers(self) -> List[T.Normalize]:
         def _collect(tform: TrainTransform, *, collected: List[T.Normalize]) -> List[T.Normalize]:
             # criteria for a target normalizer
-            if isinstance(tform, (T.ZScoreNormalizeTarget, T.MinMaxNormalizeTarget)):
+            if issubclass(type(tform), T.TargetTransform) and isinstance(tform, T.Normalize):
                 collected.append(tform)
             # recursively traverse Composed transforms
             elif isinstance(tform, T.Compose):

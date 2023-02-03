@@ -32,6 +32,7 @@ LitFalse: TypeAlias = Literal[False]
 
 class ImageSample(TypedDict):
     image: Tensor
+    mask: Tensor
 
 
 C = TypeVar("C", str, List[str])

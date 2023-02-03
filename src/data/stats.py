@@ -4,7 +4,7 @@ from typing import NamedTuple, Optional
 import torch
 from torch import Tensor
 
-from src.data.dataset import MissingValue
+from src.data.dataset import SentinelDataset
 from src.utils import some, torch_eps
 
 __all__ = [
@@ -16,7 +16,7 @@ __all__ = [
 @dataclass(unsafe_hash=True)
 class ChannelStatistics:
 
-    missing_value: Optional[MissingValue] = None
+    missing_value: Optional[SentinelDataset.MissingValue] = None
 
     _mean: Optional[Tensor] = field(init=False, default=None)
     _std: Optional[Tensor] = field(init=False, default=None)

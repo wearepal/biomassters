@@ -33,7 +33,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from typing_extensions import Self, TypeAlias
 
-from src.data.transforms import InputTransform, TargetTransform
+from src.data.transforms import InputTransformP, TargetTransformP
 from src.logging import tqdm_joblib
 from src.types import LitFalse, LitTrue, TestSample, TrainSample
 from src.utils import some
@@ -43,7 +43,7 @@ warnings.filterwarnings("ignore", category=rasterio.errors.NotGeoreferencedWarni
 __all__ = ["SentinelDataset"]
 
 
-class SentinelType(Enum):
+class _SentinelType(Enum):
     S1 = 4
     S2 = 11
 
@@ -51,7 +51,7 @@ class SentinelType(Enum):
         self.n_channels = n_channels
 
 
-class GroupBy(Enum):
+class _GroupBy(Enum):
     CHIP = ["chip"]
     CHIP_MONTH = ["chip", "month"]
 
@@ -64,7 +64,7 @@ def iszero(x: Tensor) -> Tensor:
     return x == 0.0
 
 
-class MissingValue(Enum):
+class _MissingValue(Enum):
     ZERO = (0.0, iszero)
     NAN = (torch.nan, torch.isnan)
     INF = (torch.inf, torch.isposinf)
@@ -75,7 +75,7 @@ class MissingValue(Enum):
         self.checker = checker
 
 
-class SavePrecision(Enum):
+class _SavePrecision(Enum):
     HALF = (np.float16, torch.float16)
     SINGLE = (np.float32, torch.float32)
 
@@ -84,7 +84,7 @@ class SavePrecision(Enum):
         self.torch = torch_
 
 
-class SaveWith(Enum):
+class _SaveWith(Enum):
     NP = "np"
     TORCH = "torch"
 
@@ -92,11 +92,11 @@ class SaveWith(Enum):
 class SentinelDataset(Dataset, Generic[TR, P]):
     """Sentinel 1 & 2 dataset."""
 
-    SentinelType: TypeAlias = SentinelType
-    GroupBy: TypeAlias = GroupBy
-    MissingValue: TypeAlias = MissingValue
-    SaveWith: TypeAlias = SaveWith
-    SavePrecision: TypeAlias = SavePrecision
+    SentinelType: TypeAlias = _SentinelType
+    GroupBy: TypeAlias = _GroupBy
+    MissingValue: TypeAlias = _MissingValue
+    SaveWith: TypeAlias = _SaveWith
+    SavePrecision: TypeAlias = _SavePrecision
 
     RESOLUTION: ClassVar[int] = 256
     NUM_FRAMES: ClassVar[int] = 12
@@ -156,10 +156,11 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         group_by: GroupBy = ...,
         preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
-        transform: Optional[Union[InputTransform, TargetTransform]] = ...,
+        transform: Optional[Union[InputTransformP, TargetTransformP]] = ...,
         missing_value: MissingValue = ...,
         save_with: SaveWith = ...,
         save_precision: SavePrecision = ...,
+        indices_fp: Optional[Path] = ...,
     ) -> None:
         ...
 
@@ -173,10 +174,11 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         group_by: GroupBy = ...,
         preprocess: Literal[True, False] = ...,
         n_pp_jobs: int = ...,
-        transform: Optional[InputTransform] = ...,
+        transform: Optional[InputTransformP] = ...,
         missing_value: MissingValue = ...,
         save_with: SaveWith = ...,
         save_precision: SavePrecision = ...,
+        indices_fp: Optional[Path] = ...,
     ) -> None:
         ...
 
@@ -189,10 +191,11 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         group_by: GroupBy = GroupBy.CHIP_MONTH,
         preprocess: P = True,
         n_pp_jobs: int = 8,
-        transform: Optional[Union[InputTransform, TargetTransform]] = None,
+        transform: Optional[Union[InputTransformP, TargetTransformP]] = None,
         missing_value: MissingValue = MissingValue.INF,
         save_with: SaveWith = SaveWith.NP,
         save_precision: SavePrecision = SavePrecision.HALF,
+        indices_fp: Optional[Path] = None,
     ) -> None:
         self.root = Path(root)
         self.train = train
@@ -220,10 +223,13 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             self.metadata.drop_duplicates(subset=self.group_by.value, inplace=True)
         else:
             self.metadata = pd.read_csv(self.preprocessed_dir / self.PP_METADATA_FN)
+        if indices_fp:
+            indices = cast(pd.Series, pd.read_csv(indices_fp, header=None).squeeze("columns"))
+            self.metadata = self.metadata.iloc[indices]
         self.indices = self.metadata.index.to_numpy()
         self.chip = self.metadata["chip"].to_numpy()
         self.month = (
-            self.metadata["month"].to_numpy() if self.group_by is GroupBy.CHIP_MONTH else None
+            self.metadata["month"].to_numpy() if self.group_by is _GroupBy.CHIP_MONTH else None
         )
         if self.preprocess and (not self.is_preprocessed):
             self._preprocess_data()
@@ -268,7 +274,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         def _load_save(index: int) -> None:
             sample = self._load_unprocessed(index)
             fp = pp_dir / str(index)
-            if self.save_with is SaveWith.NP:
+            if self.save_with is _SaveWith.NP:
                 fp_suffixed = fp.with_suffix(".npz")
                 # np.savez(file=fp_suffixed, **{key: value for key, value in sample.items()})
                 np.savez_compressed(
@@ -283,7 +289,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
                 )
             else:
                 fp_suffixed = fp.with_suffix(".pt")
-                if self.save_precision is SavePrecision.HALF:
+                if self.save_precision is _SavePrecision.HALF:
                     sample = {
                         key: value.to(self.save_precision.torch).numpy()
                         if isinstance(value, Tensor)
@@ -421,25 +427,26 @@ class SentinelDataset(Dataset, Generic[TR, P]):
         month = None if self.month is None else self.month[index]
         # Load in the Sentinel1 imagery.
         s1_tile = self._load_sentinel_tiles(
-            sentinel_type=SentinelType.S1,
+            sentinel_type=_SentinelType.S1,
             chip=chip,
             month=month,
         )
 
         # Load in the Sentinel2 imagery.
         s2_tile = self._load_sentinel_tiles(
-            sentinel_type=SentinelType.S2,
+            sentinel_type=_SentinelType.S2,
             chip=chip,
             month=month,
         )
         # S2 data first, S1 data second.
         sentinel_tile = torch.cat((s2_tile, s1_tile), dim=0)
         sample: Union[TestSample[str], TrainSample]
+        mask = self.missing_value.checker(sentinel_tile)
         if self.train:
             target_tile = self._load_agbm_tile(chip)
-            sample = {"image": sentinel_tile, "label": target_tile}
+            sample = {"image": sentinel_tile, "label": target_tile, "mask": mask}
         else:
-            sample = {"image": sentinel_tile, "chip": chip}
+            sample = {"image": sentinel_tile, "chip": chip, "mask": mask}
         return sample
 
     @overload
@@ -455,7 +462,7 @@ class SentinelDataset(Dataset, Generic[TR, P]):
     def _load_preprocessed(
         self: "SentinelDataset", index: int
     ) -> Union[TestSample[str], TrainSample]:
-        if self.save_with is SaveWith.NP:
+        if self.save_with is _SaveWith.NP:
             fp = self.preprocessed_dir / f"{self.indices[index]}.npz"
             sample = dict(np.load(file=fp))
             if "chip" in sample:
@@ -468,10 +475,15 @@ class SentinelDataset(Dataset, Generic[TR, P]):
             # For backwards compatibility
             if sample["image"].ndim == 3:
                 sample["image"] = sample["image"].unsqueeze(self.TEMPORAL_DIM)
+            if "mask" not in sample:
+                sample["mask"] = self.missing_value.checker(sample["image"])
             return sample
 
         fp = self.preprocessed_dir / f"{self.indices[index]}.pt"
         sample = torch.load(f=fp)
+        # for backwards compatibility
+        if "mask" not in sample:
+            sample["mask"] = self.missing_value.checker(sample["image"])
         sample["image"] = sample["image"].to(torch.float32)
         if "chip" in sample:
             sample = cast(TestSample, sample)

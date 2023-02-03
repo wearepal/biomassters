@@ -43,8 +43,12 @@ __all__ = [
     "DenormalizeModule",
     "DropBands",
     "Flatten",
+    "GammaCorrection",
     "Identity",
+    "InputTransformP",
     "InputTransform",
+    "Log1pNormalizeTarget",
+    "LogNormalizeTarget",
     "MinMaxNormalizeTarget",
     "MoveDim",
     "NanToNum",
@@ -80,18 +84,28 @@ S = TypeVar("S", bound=ImageSample)
 
 
 @runtime_checkable
-class InputTransform(Protocol):
+class InputTransformP(Protocol):
+    def __call__(self, inputs: S) -> S:
+        ...
+
+
+class InputTransform(InputTransformP):
     def __call__(self, inputs: S) -> S:
         ...
 
 
 @runtime_checkable
-class TargetTransform(Protocol):
+class TargetTransformP(Protocol):
     def __call__(self, inputs: TrainSample) -> TrainSample:
         ...
 
 
-T = TypeVar("T", Union[InputTransform, TargetTransform], InputTransform, TargetTransform)
+class TargetTransform(InputTransformP):
+    def __call__(self, inputs: S) -> S:
+        ...
+
+
+T = TypeVar("T", Union[InputTransformP, TargetTransformP], InputTransformP, TargetTransformP)
 
 
 class Compose(Generic[T]):
@@ -99,11 +113,11 @@ class Compose(Generic[T]):
         self.transforms = transforms
 
     @overload
-    def __call__(self: "Compose[InputTransform]", inputs: S) -> S:
+    def __call__(self: "Compose[InputTransformP]", inputs: S) -> S:
         ...
 
     @overload
-    def __call__(self: "Compose[TargetTransform]", inputs: TrainSample) -> TrainSample:
+    def __call__(self: "Compose[TargetTransformP]", inputs: TrainSample) -> TrainSample:
         ...
 
     @overload
@@ -141,11 +155,11 @@ class OneOf(Generic[T]):
         self.p = p
 
     @overload
-    def __call__(self: "Compose[InputTransform]", inputs: S) -> S:
+    def __call__(self: "Compose[InputTransformP]", inputs: S) -> S:
         ...
 
     @overload
-    def __call__(self: "Compose[TargetTransform]", inputs: TrainSample) -> TrainSample:
+    def __call__(self: "Compose[TargetTransformP]", inputs: TrainSample) -> TrainSample:
         ...
 
     @overload
@@ -310,30 +324,37 @@ def scale_sentinel2_data_(
 class ApplyToOpticalSlice(InputTransform):
     def __init__(
         self,
-        transform: InputTransform,
+        transform: InputTransformP,
         *,
         start_index: int,
         end_index: Optional[int] = None,
         inplace: bool = True,
+        p: float = 1.0,
     ) -> None:
         self.transform = transform
         self.start_index = start_index
         self.end_index = end_index
         self.inplace = inplace
+        self.p = p
 
     @override
     def __call__(self, inputs: S) -> S:
-        if not self.inplace:
-            inputs["image"] = inputs["image"].clone()
-        sliced_input: ImageSample = {"image": inputs["image"][self.start_index : self.end_index]}
-        inputs["image"][self.start_index : self.end_index] = self.transform(sliced_input)["image"]
+        if should_apply(self.p):
+            if not self.inplace:
+                inputs["image"] = inputs["image"].clone()
+            sliced_input: ImageSample = {
+                "image": inputs["image"][self.start_index : self.end_index]
+            }
+            inputs["image"][self.start_index : self.end_index] = self.transform(sliced_input)[
+                "image"
+            ]
         return inputs
 
 
 class ApplyToS1(ApplyToOpticalSlice):
     def __init__(
         self,
-        transform: InputTransform,
+        transform: InputTransformP,
         *,
         inplace: bool = True,
     ) -> None:
@@ -343,21 +364,22 @@ class ApplyToS1(ApplyToOpticalSlice):
 class ApplyToS2(ApplyToOpticalSlice):
     def __init__(
         self,
-        transform: InputTransform,
+        transform: InputTransformP,
         *,
         inplace: bool = True,
     ) -> None:
         super().__init__(transform=transform, start_index=0, end_index=11)
 
 
-class ApplyToTimeSlice(InputTransform):
+class ApplyToTimeSlice(InputTransformP):
     def __init__(
         self,
-        transform: InputTransform,
+        transform: InputTransformP,
         *,
         start_index: int,
         end_index: Optional[int] = None,
         inplace: bool = True,
+        p: float = 1.0,
     ) -> None:
         self.transform = transform
         self.start_index = start_index
@@ -366,12 +388,15 @@ class ApplyToTimeSlice(InputTransform):
 
     @override
     def __call__(self, inputs: S) -> S:
-        if not self.inplace:
-            inputs["image"] = inputs["image"].clone()
-        sliced_input: ImageSample = {"image": inputs["image"][:, self.start_index : self.end_index]}
-        inputs["image"][:, self.start_index : self.end_index] = self.transform(sliced_input)[
-            "image"
-        ]
+        if should_apply(self.p):
+            if not self.inplace:
+                inputs["image"] = inputs["image"].clone()
+            sliced_input: ImageSample = {
+                "image": inputs["image"][:, self.start_index : self.end_index]
+            }
+            inputs["image"][:, self.start_index : self.end_index] = self.transform(sliced_input)[
+                "image"
+            ]
         return inputs
 
 
@@ -544,6 +569,36 @@ class MinMaxNormalizeTarget(_MinMaxNormalize, TargetTransform):
         return inputs
 
 
+class LogNormalizeTarget(Normalize, TargetTransform):
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        inputs["label"] = self.transform(inputs["label"])
+        return inputs
+
+    @override
+    def _transform(self, data: Tensor) -> Tensor:
+        return data.clamp_min_(torch_eps(data)).log_()
+
+    @override
+    def _inverse_transform(self, data: Tensor) -> Tensor:
+        return data.exp_()
+
+
+class Log1pNormalizeTarget(Normalize, TargetTransform):
+    @override
+    def __call__(self, inputs: TrainSample) -> TrainSample:
+        inputs["label"] = self.transform(inputs["label"])
+        return inputs
+
+    @override
+    def _transform(self, data: Tensor) -> Tensor:
+        return torch.log1p_(data)
+
+    @override
+    def _inverse_transform(self, data: Tensor) -> Tensor:
+        return torch.expm1_(data)
+
+
 class DenormalizeModule(nn.Module):
     def __init__(self, *normalizers: Normalize) -> None:
         super().__init__()
@@ -623,9 +678,9 @@ class NanToNum(InputTransform):
     def __init__(
         self,
         *,
-        posinf: Optional[List[float]] = None,
-        neginf: Optional[List[float]] = None,
-        nan: Optional[List[float]] = None,
+        posinf: Optional[Union[List[float], float]] = None,
+        neginf: Optional[Union[List[float], float]] = None,
+        nan: Optional[Union[List[float], float]] = None,
         inplace: bool = True,
     ) -> None:
         # TODO: Use buffers
@@ -767,6 +822,31 @@ def _apply_along_time_axis(
         inputs["image"] = x_tformed
         return inputs
     return x_tformed
+
+
+class ApplyToRGB(ApplyToOpticalSlice):
+    def __init__(
+        self,
+        transform: InputTransformP,
+        *,
+        inplace: bool = True,
+        p: float = 1.0,
+    ) -> None:
+        super().__init__(transform=transform, start_index=0, end_index=3, p=p)
+
+
+class GammaCorrection(ApplyToRGB):
+    def __init__(
+        self, gamma: Union[float, Tuple[float, float, float]] = 2.2, inplace: bool = True
+    ) -> None:
+
+        self.gamma = torch.as_tensor(gamma).view(-1, 1, 1, 1)
+        self._inv_gamma = self.gamma.reciprocal()
+        super().__init__(transform=self._transform, p=1.0, inplace=inplace)
+
+    def _transform(self, inputs: S) -> S:
+        inputs["image"] = inputs["image"].pow(self._inv_gamma)
+        return inputs
 
 
 class ColorJiggle(InputTransform):

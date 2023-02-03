@@ -6,7 +6,6 @@ import pytorch_lightning as pl
 import torch
 
 from src.data import SentinelDataModule, SentinelDataset
-from src.data.dataset import SavePrecision
 import src.data.transforms as T
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from src.utils import some, unwrap_or
 
 from .common import (
     ChanLayerNorm,
+    EtaPool,
     GlobalContextAttention,
     PixelShuffleUpsample,
     Residual,
@@ -388,8 +389,13 @@ class EncoderStage(nn.Module):
                     use_gca=use_gca,
                     sd_rate=sd_rate,
                 )
+                # self._pool = (
+                #     nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+                # )
                 self._pool = (
-                    nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+                    EtaPool(in_dim=dim_out, kernel_size=3, attn_fn="softmax")
+                    if temporal_pooling
+                    else nn.Identity()
                 )
 
             def forward(self, _x: Tensor) -> Tuple[Tensor, Tensor]:
@@ -416,8 +422,13 @@ class EncoderStage(nn.Module):
                 ),
             )
         )
+        # self.final_pool = (
+        #     nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+        # )
         self.final_pool = (
-            nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+            EtaPool(in_dim=dim_out, kernel_size=3, attn_fn="softmax")
+            if temporal_pooling
+            else nn.Identity()
         )
 
     @override
@@ -584,8 +595,13 @@ class MiddleStage(nn.Module):
             use_gca=use_gca,
             sd_rate=sd_rate,
         )
+        # self.temporal_pool = (
+        #     nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+        # )
         self.temporal_pool = (
-            nn.AdaptiveAvgPool3d((1, None, None)) if temporal_pooling else nn.Identity()
+            EtaPool(in_dim=dim, kernel_size=3, attn_fn="softmax")
+            if temporal_pooling
+            else nn.Identity()
         )
 
     @override
@@ -681,8 +697,13 @@ class Unet3dVd(nn.Module):
         )
 
         self.init_temporal_attn = Residual(PreNorm(init_dim, fn=temporal_attn(init_dim)))
+        # self.init_temporal_pool = (
+        #     nn.AdaptiveAvgPool3d((1, None, None)) if spatial_decoder else nn.Identity()
+        # )
         self.init_temporal_pool = (
-            nn.AdaptiveAvgPool3d((1, None, None)) if spatial_decoder else nn.Identity()
+            EtaPool(init_dim, kernel_size=3, attn_fn="softmax")
+            if spatial_decoder
+            else nn.Identity()
         )
 
         # dimensions
@@ -774,7 +795,8 @@ class Unet3dVd(nn.Module):
             # dim of decoder's output + init residual dim
             final_conv_dim = dim * 2
 
-        self.final_temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
+        # self.final_temporal_pool = nn.AdaptiveAvgPool3d((1, None, None))
+        self.final_temporal_pool = EtaPool(final_conv_dim, kernel_size=3, attn_fn="softmax")
 
         # Final (2d) conv block operating on temporally-pooled features
         self.final_conv = nn.Sequential(
