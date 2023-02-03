@@ -1,7 +1,5 @@
 from pathlib import Path
-import time
 
-from PIL import Image
 import pytorch_lightning as pl
 import torch
 
@@ -17,9 +15,8 @@ if __name__ == "__main__":
         pin_memory=False,
         group_by=SentinelDataset.GroupBy.CHIP,
         preprocess=True,
-        # tile_dir=Path("sample_selection/tile_list_best_months"),
-        train_batch_size=16,  # type: ignore
-        eval_batch_size=16,  # type: ignore
+        train_batch_size=16,
+        eval_batch_size=16,
         n_pp_jobs=64,
         num_workers=3,
         val_prop=0.2,
@@ -31,4 +28,4 @@ if __name__ == "__main__":
     )
     dm.setup()
     stats = dm.train_statistics(compute_var=True)
-    breakpoint()
+    print(stats)
